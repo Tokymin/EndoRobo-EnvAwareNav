@@ -1,0 +1,112 @@
+# Camera Configuration File
+# 相机配置文件 - 内窥镜相机参数
+
+camera:
+  # 相机分辨率
+  width: 1920
+  height: 1080
+  
+  # 帧率
+  fps: 30
+  
+  # 相机ID（用于多相机系统）
+  camera_id: 0
+  
+  # 相机内参矩阵 (3x3)
+  # [fx  0  cx]
+  # [0  fy  cy]
+  # [0   0   1]
+  intrinsics:
+    fx: 1000.0    # 焦距 x
+    fy: 1000.0    # 焦距 y
+    cx: 960.0     # 主点 x（图像中心）
+    cy: 540.0     # 主点 y（图像中心）
+  
+  # 畸变系数 [k1, k2, p1, p2, k3]
+  distortion:
+    k1: 0.0       # 径向畸变系数
+    k2: 0.0
+    k3: 0.0
+    p1: 0.0       # 切向畸变系数
+    p2: 0.0
+
+# 图像预处理参数
+preprocessing:
+  # 是否启用畸变校正
+  undistort: true
+  
+  # 是否启用直方图均衡化
+  histogram_equalization: false
+  
+  # 图像缩放因子（用于加速处理）
+  scale_factor: 1.0
+
+# Python模型配置
+python_models:
+  # 位姿估计模型路径
+  pose_estimation:
+    model_path: "python_models/pose_estimation/model.pth"
+    input_size: [224, 224]
+    use_gpu: true
+    
+  # 深度估计模型路径
+  depth_estimation:
+    model_path: "python_models/depth_estimation/model.pth"
+    input_size: [384, 384]
+    use_gpu: true
+    min_depth: 0.01
+    max_depth: 10.0
+
+# 3D重建参数
+reconstruction:
+  # 点云密度控制
+  voxel_size: 0.005  # 体素大小（米）
+  
+  # 肠腔特定参数
+  intestinal:
+    # 管状结构半径范围（米）
+    min_radius: 0.010
+    max_radius: 0.050
+    
+    # 表面平滑参数
+    smoothing_iterations: 5
+    
+  # 冗余点去除参数
+  redundancy_removal:
+    # 距离阈值（米）
+    distance_threshold: 0.003
+    
+    # 法向量夹角阈值（度）
+    normal_angle_threshold: 15.0
+    
+    # 统计离群点去除
+    statistical_outlier:
+      nb_neighbors: 20
+      std_ratio: 2.0
+
+# 实时性能参数
+performance:
+  # 最大处理队列长度
+  max_queue_size: 10
+  
+  # 是否启用多线程
+  enable_multithreading: true
+  
+  # 处理线程数（0表示自动检测）
+  num_threads: 0
+
+# 可视化参数
+visualization:
+  # 是否显示实时图像
+  show_camera_feed: true
+  
+  # 是否显示3D重建结果
+  show_3d_reconstruction: true
+  
+  # 是否显示深度图
+  show_depth_map: true
+  
+  # 窗口大小
+  window_width: 1280
+  window_height: 720
+

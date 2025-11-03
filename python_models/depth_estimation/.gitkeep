@@ -1,0 +1,4 @@
+# Place your depth estimation model weights here
+# 将深度估计模型权重文件放在此目录
+# 例如: model.pth
+
