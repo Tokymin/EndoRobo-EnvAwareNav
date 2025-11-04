@@ -25,9 +25,10 @@ struct FeaturePoint {
  * @brief 深度估计结果
  */
 struct DepthEstimation {
-    cv::Mat depth_map;                      // 深度图
-    std::vector<FeaturePoint> features;     // 特征点
-    bool valid;                             // 是否有效
+    cv::Mat depth_map;                          // 深度图
+    std::vector<FeaturePoint> features;         // 特征点
+    std::vector<cv::Point3f> feature_points;    // 简化的特征点 (x, y, depth)
+    bool valid;                                 // 是否有效
     
     DepthEstimation() : valid(false) {}
 };
@@ -90,7 +91,7 @@ public:
     /**
      * @brief 检查是否已初始化
      */
-    bool isInitialized() const { return initialized_; }
+    bool isInitialized() const;
     
 private:
     PythonModelConfig config_;
@@ -99,6 +100,7 @@ private:
     
     PyObject* model_module_;
     PyObject* predict_func_;
+    PyObject* depth_model_;  // Depth Anything V2 model instance
     
     bool initialized_;
     

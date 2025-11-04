@@ -88,6 +88,7 @@ void CameraCapture::captureLoop() {
     LOG_INFO("Capture loop started");
     
     cv::Mat frame;
+    int frame_count = 0;
     
     while (is_running_) {
         if (!capture_->read(frame)) {
@@ -101,6 +102,14 @@ void CameraCapture::captureLoop() {
             continue;
         }
         
+        // Log first successful frame
+        frame_count++;
+        if (frame_count == 1) {
+            LOG_INFO("First frame captured successfully! Size: ", frame.cols, "x", frame.rows);
+        } else if (frame_count % 100 == 0) {
+            LOG_INFO("Captured ", frame_count, " frames");
+        }
+        
         // 更新最新帧
         {
             std::lock_guard<std::mutex> lock(frame_mutex_);
@@ -112,7 +121,7 @@ void CameraCapture::captureLoop() {
         updateFPS();
     }
     
-    LOG_INFO("Capture loop ended");
+    LOG_INFO("Capture loop ended. Total frames captured: ", frame_count);
 }
 
 bool CameraCapture::getLatestFrame(cv::Mat& frame, int timeout_ms) {

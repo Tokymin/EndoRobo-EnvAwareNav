@@ -30,7 +30,10 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 find_package(yaml-cpp REQUIRED)
 
 # PCL (Point Cloud Library) for 3D reconstruction
-find_package(PCL 1.10 REQUIRED COMPONENTS common io filters surface visualization)
+# Made optional - can use system PCL 1.9+ or vcpkg version
+# Temporarily disabled - install via vcpkg if needed
+# find_package(PCL 1.9 QUIET COMPONENTS common io filters surface visualization)
+set(PCL_FOUND FALSE)
 
 # 包含目录
 include_directories(
@@ -39,16 +42,30 @@ include_directories(
     ${EIGEN3_INCLUDE_DIRS}
     ${Python3_INCLUDE_DIRS}
     ${YAML_CPP_INCLUDE_DIRS}
-    ${PCL_INCLUDE_DIRS}
 )
 
-# 链接目录
-link_directories(
-    ${PCL_LIBRARY_DIRS}
-)
+# Add NumPy include directory
+if(Python3_FOUND)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import numpy; print(numpy.get_include())"
+        OUTPUT_VARIABLE NUMPY_INCLUDE_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NUMPY_INCLUDE_DIR)
+        include_directories(${NUMPY_INCLUDE_DIR})
+        message(STATUS "NumPy include: ${NUMPY_INCLUDE_DIR}")
+    endif()
+endif()
 
-# 添加编译定义
-add_definitions(${PCL_DEFINITIONS})
+# PCL is optional
+if(PCL_FOUND)
+    include_directories(${PCL_INCLUDE_DIRS})
+    link_directories(${PCL_LIBRARY_DIRS})
+    add_definitions(${PCL_DEFINITIONS})
+    message(STATUS "PCL ${PCL_VERSION} found - 3D reconstruction enabled")
+else()
+    message(WARNING "PCL not found - 3D reconstruction features disabled")
+endif()
 
 # 源文件
 set(CORE_SOURCES
@@ -64,13 +81,14 @@ set(CAMERA_SOURCES
 set(PYTHON_INTERFACE_SOURCES
     src/python_interface/python_wrapper.cpp
     src/python_interface/pose_estimator.cpp
-    src/python_interface/depth_estimator.cpp
+    src/python_interface/depth_estimator_dav2.cpp
 )
 
 set(RECONSTRUCTION_SOURCES
-    src/reconstruction/point_cloud_builder.cpp
-    src/reconstruction/intestinal_reconstructor.cpp
-    src/reconstruction/redundancy_remover.cpp
+    # PCL-dependent files temporarily disabled
+    # src/reconstruction/point_cloud_builder.cpp
+    # src/reconstruction/intestinal_reconstructor.cpp
+    # src/reconstruction/redundancy_remover.cpp
 )
 
 set(UTILS_SOURCES
@@ -93,8 +111,12 @@ target_link_libraries(endorobo_core
     Eigen3::Eigen
     ${Python3_LIBRARIES}
     yaml-cpp
-    ${PCL_LIBRARIES}
 )
+
+# Link PCL if found
+if(PCL_FOUND)
+    target_link_libraries(endorobo_core ${PCL_LIBRARIES})
+endif()
 
 # 主程序
 add_executable(endorobo_main

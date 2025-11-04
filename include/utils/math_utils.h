@@ -3,6 +3,11 @@
 #include <Eigen/Dense>
 #include <opencv2/opencv.hpp>
 
+// Define M_PI for MSVC
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 namespace endorobo {
 namespace math_utils {
 

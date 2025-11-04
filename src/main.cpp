@@ -11,9 +11,10 @@
 #include "python_interface/python_wrapper.h"
 #include "python_interface/pose_estimator.h"
 #include "python_interface/depth_estimator.h"
-#include "reconstruction/point_cloud_builder.h"
-#include "reconstruction/intestinal_reconstructor.h"
-#include "reconstruction/redundancy_remover.h"
+// PCL-dependent headers temporarily disabled
+// #include "reconstruction/point_cloud_builder.h"
+// #include "reconstruction/intestinal_reconstructor.h"
+// #include "reconstruction/redundancy_remover.h"
 #include "utils/timer.h"
 
 using namespace endorobo;
@@ -85,20 +86,14 @@ public:
             // 继续运行，但深度估计功能不可用
         }
         
-        // 初始化点云构建器
-        point_cloud_builder_ = std::make_unique<PointCloudBuilder>();
+        // PCL-dependent initialization temporarily disabled
+        // point_cloud_builder_ = std::make_unique<PointCloudBuilder>();
+        // intestinal_reconstructor_ = std::make_unique<IntestinalReconstructor>(
+        //     config_manager_.getReconstructionConfig());
+        // redundancy_remover_ = std::make_unique<RedundancyRemover>(
+        //     config_manager_.getReconstructionConfig().redundancy_removal);
         
-        // 初始化肠腔重建器
-        intestinal_reconstructor_ = std::make_unique<IntestinalReconstructor>(
-            config_manager_.getReconstructionConfig());
-        if (!intestinal_reconstructor_->initialize()) {
-            LOG_ERROR("Failed to initialize intestinal reconstructor");
-            return false;
-        }
-        
-        // 初始化冗余点去除器
-        redundancy_remover_ = std::make_unique<RedundancyRemover>(
-            config_manager_.getReconstructionConfig().redundancy_removal);
+        LOG_WARNING("3D reconstruction features disabled (PCL not available)");
         
         LOG_INFO("Application initialized successfully");
         return true;
@@ -225,6 +220,12 @@ private:
             }
             double preprocess_time = frame_timer.stop("preprocessing");
             
+            // 更新显示用的帧
+            {
+                std::lock_guard<std::mutex> lock(display_mutex_);
+                processed_frame.copyTo(latest_frame_);
+            }
+            
             // 位姿估计
             PoseEstimation pose;
             frame_timer.start("pose_estimation");
@@ -240,30 +241,45 @@ private:
             }
             double pose_time = frame_timer.stop("pose_estimation");
             
-            // 深度估计
+            // 深度估计（降低频率以提高响应速度 - 每10帧估计一次）
             DepthEstimation depth;
-            frame_timer.start("depth_estimation");
-            if (depth_estimator_ && depth_estimator_->isInitialized()) {
-                if (!depth_estimator_->estimateDepth(processed_frame, depth)) {
-                    LOG_WARNING("Depth estimation failed");
-                }
-            }
-            double depth_time = frame_timer.stop("depth_estimation");
+            double depth_time = 0.0;
             
-            // 点云构建
-            frame_timer.start("point_cloud");
-            if (depth.valid && !depth.depth_map.empty()) {
-                const auto& cam_config = config_manager_.getCameraConfig();
-                auto cloud = point_cloud_builder_->createPointCloud(
-                    depth.depth_map, processed_frame, pose,
-                    cam_config.fx, cam_config.fy, cam_config.cx, cam_config.cy);
-                
-                // 添加到肠腔重建器
-                if (cloud && !cloud->empty()) {
-                    intestinal_reconstructor_->addFrame(cloud, pose);
+            // 只在每10帧执行深度估计（CPU上很慢）
+            if (frame_count_ % 10 == 0) {
+                frame_timer.start("depth_estimation");
+                if (depth_estimator_ && depth_estimator_->isInitialized()) {
+                    if (depth_estimator_->estimateDepth(processed_frame, depth)) {
+                        if (depth.valid && !depth.depth_map.empty()) {
+                            // 更新显示用的深度图
+                            std::lock_guard<std::mutex> lock(display_mutex_);
+                            depth.depth_map.copyTo(latest_depth_);
+                            
+                            if (frame_count_ % 100 == 0) {
+                                LOG_INFO("Depth map updated (", depth.depth_map.cols, "x", 
+                                        depth.depth_map.rows, ")");
+                            }
+                        }
+                    } else if (frame_count_ % 100 == 0) {
+                        LOG_WARNING("Depth estimation failed");
+                    }
                 }
+                depth_time = frame_timer.stop("depth_estimation");
             }
-            double cloud_time = frame_timer.stop("point_cloud");
+            
+            // 点云构建 (temporarily disabled)
+            double cloud_time = 0.0;
+            // if (depth.valid && !depth.depth_map.empty()) {
+            //     frame_timer.start("point_cloud");
+            //     const auto& cam_config = config_manager_.getCameraConfig();
+            //     auto cloud = point_cloud_builder_->createPointCloud(
+            //         depth.depth_map, processed_frame, pose,
+            //         cam_config.fx, cam_config.fy, cam_config.cx, cam_config.cy);
+            //     if (cloud && !cloud->empty()) {
+            //         intestinal_reconstructor_->addFrame(cloud, pose);
+            //     }
+            //     cloud_time = frame_timer.stop("point_cloud");
+            // }
             
             // 更新显示
             {
@@ -295,34 +311,22 @@ private:
     }
     
     void saveReconstruction() {
-        LOG_INFO("Saving reconstruction...");
-        
-        auto cloud = intestinal_reconstructor_->getProcessedCloud();
-        if (!cloud || cloud->empty()) {
-            LOG_WARNING("No reconstruction data to save");
-            return;
-        }
-        
-        // 保存点云
-        std::string cloud_filename = "reconstruction_" + 
-            std::to_string(std::time(nullptr)) + ".pcd";
-        pcl::io::savePCDFileBinary(cloud_filename, *cloud);
-        LOG_INFO("Point cloud saved to: ", cloud_filename);
-        
-        // 保存网格（如果需要）
-        auto mesh = intestinal_reconstructor_->reconstructSurface();
-        if (mesh && !mesh->polygons.empty()) {
-            std::string mesh_filename = "reconstruction_" + 
-                std::to_string(std::time(nullptr)) + ".ply";
-            pcl::io::savePLYFile(mesh_filename, *mesh);
-            LOG_INFO("Mesh saved to: ", mesh_filename);
-        }
+        LOG_WARNING("Reconstruction save disabled (PCL not available)");
+        // auto cloud = intestinal_reconstructor_->getProcessedCloud();
+        // if (!cloud || cloud->empty()) {
+        //     LOG_WARNING("No reconstruction data to save");
+        //     return;
+        // }
+        // std::string cloud_filename = "reconstruction_" + 
+        //     std::to_string(std::time(nullptr)) + ".pcd";
+        // pcl::io::savePCDFileBinary(cloud_filename, *cloud);
+        // LOG_INFO("Point cloud saved to: ", cloud_filename);
     }
     
     void resetReconstruction() {
-        LOG_INFO("Resetting reconstruction...");
-        intestinal_reconstructor_->reset();
-        frame_count_ = 0;
+        LOG_WARNING("Reconstruction reset disabled (PCL not available)");
+        // intestinal_reconstructor_->reset();
+        // frame_count_ = 0;
     }
     
     ConfigManager config_manager_;
@@ -332,9 +336,10 @@ private:
     std::unique_ptr<ImageProcessor> image_processor_;
     std::unique_ptr<PoseEstimator> pose_estimator_;
     std::unique_ptr<DepthEstimator> depth_estimator_;
-    std::unique_ptr<PointCloudBuilder> point_cloud_builder_;
-    std::unique_ptr<IntestinalReconstructor> intestinal_reconstructor_;
-    std::unique_ptr<RedundancyRemover> redundancy_remover_;
+    // PCL-dependent members temporarily disabled
+    // std::unique_ptr<PointCloudBuilder> point_cloud_builder_;
+    // std::unique_ptr<IntestinalReconstructor> intestinal_reconstructor_;
+    // std::unique_ptr<RedundancyRemover> redundancy_remover_;
     
     std::atomic<bool> running_;
     std::thread processing_thread_;
