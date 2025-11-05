@@ -66,13 +66,14 @@ class DepthModel:
         return os.path.join(script_dir, 'depth_anything_v2', 'checkpoints', model_filename)
     
     @torch.no_grad()
-    def estimate_depth(self, image, input_size=518):
+    def estimate_depth(self, image, input_size=392):
         """
         估计深度图
         
         Args:
             image: BGR格式的numpy数组 (H, W, 3)
-            input_size: 输入尺寸，越大越精细但越慢
+            input_size: 输入尺寸，必须是14的倍数 (ViT patch size)
+                       推荐: 392(28*14), 448(32*14), 518(37*14)
             
         Returns:
             depth: 深度图 (H, W)，归一化到0-255
@@ -84,7 +85,7 @@ class DepthModel:
         if len(image.shape) == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
         
-        # 使用模型推理
+        # 使用模型推理 (使用较小的尺寸以避免维度不匹配，同时提高速度)
         depth = self.model.infer_image(image, input_size=input_size)
         
         return depth

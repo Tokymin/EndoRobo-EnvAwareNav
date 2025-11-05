@@ -100,7 +100,7 @@ bool DepthEstimator::initialize(std::shared_ptr<PythonWrapper> python_wrapper) {
         PyObject* args = PyTuple_New(0);
         PyObject* kwargs = PyDict_New();
         PyDict_SetItemString(kwargs, "model_size", PyUnicode_FromString("vits"));
-        PyDict_SetItemString(kwargs, "device", PyUnicode_FromString("cpu"));  // 使用CPU而不是CUDA
+        PyDict_SetItemString(kwargs, "device", PyUnicode_FromString("cuda"));  // Use CUDA for GPU acceleration
         
         depth_model_ = PyObject_Call(depth_class, args, kwargs);
         Py_XDECREF(args);

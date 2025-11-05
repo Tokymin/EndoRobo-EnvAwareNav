@@ -27,7 +27,9 @@ public:
     EndoRoboApp(const std::string& config_file)
         : config_manager_(config_file)
         , running_(false)
-        , frame_count_(0) {
+        , frame_count_(0)
+        , depth_running_(false)
+        , depth_frame_ready_(false) {
     }
     
     ~EndoRoboApp() {
@@ -39,20 +41,20 @@ public:
         LOG_INFO("EndoRobo Environment-Aware Navigation");
         LOG_INFO("========================================");
         
-        // 加载配置
+        // Load configuration
         if (!config_manager_.loadConfig()) {
             LOG_ERROR("Failed to load configuration");
             return false;
         }
         
-        // 初始化Python解释器
+        // Initialize Python interpreter
         python_wrapper_ = std::make_shared<PythonWrapper>();
         if (!python_wrapper_->initialize()) {
             LOG_ERROR("Failed to initialize Python wrapper");
             return false;
         }
         
-        // 初始化相机
+        // Initialize camera
         camera_ = std::make_unique<CameraCapture>(
             config_manager_.getCameraConfig());
         if (!camera_->initialize()) {
@@ -60,7 +62,7 @@ public:
             return false;
         }
         
-        // 初始化图像处理器
+        // Initialize image processor
         image_processor_ = std::make_unique<ImageProcessor>(
             config_manager_.getCameraConfig(),
             config_manager_.getPreprocessingConfig());
@@ -69,21 +71,21 @@ public:
             return false;
         }
         
-        // 初始化位姿估计器
+        // Initialize pose estimator
         pose_estimator_ = std::make_unique<PoseEstimator>(
             config_manager_.getPoseModelConfig());
         if (!pose_estimator_->initialize(python_wrapper_)) {
             LOG_WARNING("Failed to initialize pose estimator (Python model may not be ready)");
-            // 继续运行，但位姿估计功能不可用
+            // Continue execution, pose estimation will be unavailable
         }
         
-        // 初始化深度估计器
+        // Initialize depth estimator
         depth_estimator_ = std::make_unique<DepthEstimator>(
             config_manager_.getDepthModelConfig(),
             config_manager_.getCameraConfig());
         if (!depth_estimator_->initialize(python_wrapper_)) {
             LOG_WARNING("Failed to initialize depth estimator (Python model may not be ready)");
-            // 继续运行，但深度估计功能不可用
+            // Continue execution, depth estimation will be unavailable
         }
         
         // PCL-dependent initialization temporarily disabled
@@ -108,6 +110,13 @@ public:
         running_ = true;
         processing_thread_ = std::thread(&EndoRoboApp::processingLoop, this);
         
+        // Start async depth estimation thread
+        if (depth_estimator_ && depth_estimator_->isInitialized()) {
+            depth_running_ = true;
+            depth_thread_ = std::thread(&EndoRoboApp::depthEstimationLoop, this);
+            LOG_INFO("Depth estimation thread started");
+        }
+        
         LOG_INFO("Application started");
         return true;
     }
@@ -117,9 +126,14 @@ public:
         
         LOG_INFO("Stopping application...");
         running_ = false;
+        depth_running_ = false;
         
         if (processing_thread_.joinable()) {
             processing_thread_.join();
+        }
+        
+        if (depth_thread_.joinable()) {
+            depth_thread_.join();
         }
         
         camera_->stopCapture();
@@ -141,7 +155,7 @@ public:
         LOG_INFO("Press 'q' to quit, 's' to save reconstruction, 'r' to reset");
         
         while (running_) {
-            // 显示相机画面
+            // Display camera feed
             if (vis_config.show_camera_feed) {
                 cv::Mat display_frame;
                 {
@@ -152,7 +166,7 @@ public:
                 }
                 
                 if (!display_frame.empty()) {
-                    // 添加信息文本
+                    // Add info text
                     std::string info = "Frame: " + std::to_string(frame_count_) +
                                       " | FPS: " + std::to_string(static_cast<int>(camera_->getFPS()));
                     cv::putText(display_frame, info, cv::Point(10, 30),
@@ -162,7 +176,7 @@ public:
                 }
             }
             
-            // 显示深度图
+            // Display depth map
             if (vis_config.show_depth_map) {
                 cv::Mat display_depth;
                 {
@@ -173,7 +187,7 @@ public:
                 }
                 
                 if (!display_depth.empty()) {
-                    // 归一化深度图用于显示
+                    // Normalize depth map for display
                     cv::Mat depth_normalized;
                     cv::normalize(display_depth, depth_normalized, 0, 255, cv::NORM_MINMAX, CV_8U);
                     cv::applyColorMap(depth_normalized, depth_normalized, cv::COLORMAP_JET);
@@ -181,11 +195,11 @@ public:
                 }
             }
             
-            // 处理按键
+            // Handle key press
             int key = cv::waitKey(1);
             if (key == 'q' || key == 'Q' || key == 27) {  // ESC
                 break;
-            } else if (key == 's' || key == 'S') {
+            } else if (key == 'S' || key == 'S') {
                 saveReconstruction();
             } else if (key == 'r' || key == 'R') {
                 resetReconstruction();
@@ -196,6 +210,64 @@ public:
     }
     
 private:
+    void depthEstimationLoop() {
+        LOG_INFO("Depth estimation loop started");
+        
+        int depth_frame_count = 0;
+        
+        while (depth_running_) {
+            cv::Mat frame_to_process;
+            bool has_frame = false;
+            
+            // Check if there's a new frame to process
+            {
+                std::lock_guard<std::mutex> lock(depth_input_mutex_);
+                if (depth_frame_ready_ && !depth_input_frame_.empty()) {
+                    depth_input_frame_.copyTo(frame_to_process);
+                    depth_frame_ready_ = false;
+                    has_frame = true;
+                }
+            }
+            
+            if (has_frame) {
+                // Execute depth estimation with GIL protection
+                Timer depth_timer;
+                depth_timer.start("depth_estimation");
+                
+                // Acquire Python GIL for thread-safe Python calls
+                PyGILState_STATE gstate = PyGILState_Ensure();
+                
+                DepthEstimation depth;
+                bool success = depth_estimator_->estimateDepth(frame_to_process, depth);
+                
+                // Release Python GIL
+                PyGILState_Release(gstate);
+                
+                if (success) {
+                    if (depth.valid && !depth.depth_map.empty()) {
+                        // Update depth map for display
+                        std::lock_guard<std::mutex> lock(display_mutex_);
+                        depth.depth_map.copyTo(latest_depth_);
+                        
+                        depth_frame_count++;
+                        double elapsed = depth_timer.stop("depth_estimation");
+                        
+                        // Log performance every 10 estimates
+                        if (depth_frame_count % 10 == 0) {
+                            LOG_INFO("Depth estimation: frame ", depth_frame_count, 
+                                    " took ", elapsed, "ms");
+                        }
+                    }
+                }
+            } else {
+                // No new frame, sleep briefly
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+        
+        LOG_INFO("Depth estimation loop ended. Total depth frames: ", depth_frame_count);
+    }
+    
     void processingLoop() {
         LOG_INFO("Processing loop started");
         
@@ -205,13 +277,13 @@ private:
         while (running_) {
             frame_timer.start("total");
             
-            // 获取最新帧
+            // Get latest frame
             cv::Mat frame;
             if (!camera_->getLatestFrame(frame, 100)) {
                 continue;
             }
             
-            // 图像预处理
+            // Image preprocessing
             cv::Mat processed_frame;
             frame_timer.start("preprocessing");
             if (!image_processor_->process(frame, processed_frame)) {
@@ -220,13 +292,13 @@ private:
             }
             double preprocess_time = frame_timer.stop("preprocessing");
             
-            // 更新显示用的帧
+            // Update frame for display
             {
                 std::lock_guard<std::mutex> lock(display_mutex_);
                 processed_frame.copyTo(latest_frame_);
             }
             
-            // 位姿估计
+            // Pose estimation
             PoseEstimation pose;
             frame_timer.start("pose_estimation");
             if (pose_estimator_ && pose_estimator_->isInitialized()) {
@@ -241,33 +313,17 @@ private:
             }
             double pose_time = frame_timer.stop("pose_estimation");
             
-            // 深度估计（降低频率以提高响应速度 - 每10帧估计一次）
-            DepthEstimation depth;
-            double depth_time = 0.0;
-            
-            // 只在每10帧执行深度估计（CPU上很慢）
-            if (frame_count_ % 10 == 0) {
-                frame_timer.start("depth_estimation");
-                if (depth_estimator_ && depth_estimator_->isInitialized()) {
-                    if (depth_estimator_->estimateDepth(processed_frame, depth)) {
-                        if (depth.valid && !depth.depth_map.empty()) {
-                            // 更新显示用的深度图
-                            std::lock_guard<std::mutex> lock(display_mutex_);
-                            depth.depth_map.copyTo(latest_depth_);
-                            
-                            if (frame_count_ % 100 == 0) {
-                                LOG_INFO("Depth map updated (", depth.depth_map.cols, "x", 
-                                        depth.depth_map.rows, ")");
-                            }
-                        }
-                    } else if (frame_count_ % 100 == 0) {
-                        LOG_WARNING("Depth estimation failed");
-                    }
+            // Submit depth estimation task asynchronously (every 10 frames)
+            if (depth_running_ && frame_count_ % 10 == 0) {
+                std::lock_guard<std::mutex> lock(depth_input_mutex_);
+                // Only submit new frame if previous one is processed (avoid backlog)
+                if (!depth_frame_ready_) {
+                    processed_frame.copyTo(depth_input_frame_);
+                    depth_frame_ready_ = true;
                 }
-                depth_time = frame_timer.stop("depth_estimation");
             }
             
-            // 点云构建 (temporarily disabled)
+            // Point cloud construction (temporarily disabled)
             double cloud_time = 0.0;
             // if (depth.valid && !depth.depth_map.empty()) {
             //     frame_timer.start("point_cloud");
@@ -281,29 +337,18 @@ private:
             //     cloud_time = frame_timer.stop("point_cloud");
             // }
             
-            // 更新显示
-            {
-                std::lock_guard<std::mutex> lock(display_mutex_);
-                frame.copyTo(latest_frame_);
-                if (depth.valid) {
-                    depth.depth_map.copyTo(latest_depth_);
-                }
-            }
-            
-            // 保存前一帧
+            // Save previous frame
             processed_frame.copyTo(previous_frame);
             
             frame_count_++;
             
             double total_time = frame_timer.stop("total");
             
-            // 定期打印性能统计
+            // Periodically print performance stats
             if (frame_count_ % 30 == 0) {
                 LOG_INFO("Frame ", frame_count_, " - Total: ", total_time, "ms | ",
                         "Preprocess: ", preprocess_time, "ms | ",
-                        "Pose: ", pose_time, "ms | ",
-                        "Depth: ", depth_time, "ms | ",
-                        "Cloud: ", cloud_time, "ms");
+                        "Pose: ", pose_time, "ms");
             }
         }
         
@@ -345,43 +390,50 @@ private:
     std::thread processing_thread_;
     std::atomic<int> frame_count_;
     
-    // 显示用的数据
+    // Async depth estimation
+    std::thread depth_thread_;
+    std::atomic<bool> depth_running_;
+    std::mutex depth_input_mutex_;
+    cv::Mat depth_input_frame_;
+    bool depth_frame_ready_;
+    
+    // Data for display
     std::mutex display_mutex_;
     cv::Mat latest_frame_;
     cv::Mat latest_depth_;
 };
 
 int main(int argc, char** argv) {
-    // 设置日志
+    // Setup logging
     Logger::getInstance().setLogLevel(LogLevel::INFO);
     Logger::getInstance().setLogFile("endorobo.log");
     
-    // 解析命令行参数
+    // Parse command line arguments
     std::string config_file = "config/camera_config.yaml";
     if (argc > 1) {
         config_file = argv[1];
     }
     
     try {
-        // 创建应用程序
+        // Create application
         EndoRoboApp app(config_file);
         
-        // 初始化
+        // Initialize
         if (!app.initialize()) {
             LOG_FATAL("Failed to initialize application");
             return -1;
         }
         
-        // 启动
+        // Start
         if (!app.start()) {
             LOG_FATAL("Failed to start application");
             return -1;
         }
         
-        // 运行主循环
+        // Run main loop
         app.run();
         
-        // 停止
+        // Stop
         app.stop();
         
         LOG_INFO("Application exited successfully");
