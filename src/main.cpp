@@ -11,6 +11,7 @@
 #include "python_interface/python_wrapper.h"
 #include "python_interface/pose_estimator.h"
 #include "python_interface/depth_estimator.h"
+#include "navigation/visual_odometry.h"
 // PCL-dependent headers temporarily disabled
 // #include "reconstruction/point_cloud_builder.h"
 // #include "reconstruction/intestinal_reconstructor.h"
@@ -88,6 +89,18 @@ public:
             // Continue execution, depth estimation will be unavailable
         }
         
+        // Initialize visual odometry
+        visual_odometry_ = std::make_unique<VisualOdometry>();
+        cv::Mat camera_matrix = (cv::Mat_<double>(3,3) << 
+            config_manager_.getCameraConfig().fx, 0, config_manager_.getCameraConfig().cx,
+            0, config_manager_.getCameraConfig().fy, config_manager_.getCameraConfig().cy,
+            0, 0, 1);
+        if (!visual_odometry_->initialize(camera_matrix)) {
+            LOG_WARNING("Failed to initialize visual odometry");
+        } else {
+            LOG_INFO("Visual odometry initialized successfully");
+        }
+        
         // PCL-dependent initialization temporarily disabled
         // point_cloud_builder_ = std::make_unique<PointCloudBuilder>();
         // intestinal_reconstructor_ = std::make_unique<IntestinalReconstructor>(
@@ -151,11 +164,13 @@ public:
         if (vis_config.show_depth_map) {
             cv::namedWindow("Depth Map", cv::WINDOW_NORMAL);
         }
+        // Always show trajectory window
+        cv::namedWindow("Camera Trajectory", cv::WINDOW_NORMAL);
         
-        LOG_INFO("Press 'q' to quit, 's' to save reconstruction, 'r' to reset");
+        LOG_INFO("Press 'q' to quit, 's' to save reconstruction, 'r' to reset trajectory");
         
         while (running_) {
-            // Display camera feed
+            // Display camera feed with tracked features
             if (vis_config.show_camera_feed) {
                 cv::Mat display_frame;
                 {
@@ -166,11 +181,20 @@ public:
                 }
                 
                 if (!display_frame.empty()) {
+                    // Draw tracked features
+                    if (visual_odometry_) {
+                        display_frame = visual_odometry_->drawFeatures(display_frame);
+                    }
+                    
                     // Add info text
                     std::string info = "Frame: " + std::to_string(frame_count_) +
                                       " | FPS: " + std::to_string(static_cast<int>(camera_->getFPS()));
+                    if (visual_odometry_) {
+                        info += " | Features: " + std::to_string(visual_odometry_->getTrackedFeatureCount());
+                        info += " | Distance: " + std::to_string(static_cast<int>(visual_odometry_->getDistanceTraveled() * 100)) + "cm";
+                    }
                     cv::putText(display_frame, info, cv::Point(10, 30),
-                               cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0), 2);
+                               cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
                     
                     cv::imshow("Camera Feed", display_frame);
                 }
@@ -195,14 +219,23 @@ public:
                 }
             }
             
+            // Display trajectory
+            if (visual_odometry_) {
+                cv::Mat trajectory_view = visual_odometry_->drawTrajectory(800, 600, 100.0);
+                cv::imshow("Camera Trajectory", trajectory_view);
+            }
+            
             // Handle key press
             int key = cv::waitKey(1);
             if (key == 'q' || key == 'Q' || key == 27) {  // ESC
                 break;
-            } else if (key == 'S' || key == 'S') {
+            } else if (key == 's' || key == 'S') {
                 saveReconstruction();
             } else if (key == 'r' || key == 'R') {
-                resetReconstruction();
+                if (visual_odometry_) {
+                    visual_odometry_->reset();
+                    LOG_INFO("Trajectory reset");
+                }
             }
         }
         
@@ -323,6 +356,22 @@ private:
                 }
             }
             
+            // Visual odometry: estimate camera pose using depth map
+            if (visual_odometry_) {
+                cv::Mat depth_for_vo;
+                {
+                    std::lock_guard<std::mutex> lock(display_mutex_);
+                    if (!latest_depth_.empty()) {
+                        depth_for_vo = latest_depth_.clone();
+                    }
+                }
+                
+                if (!depth_for_vo.empty()) {
+                    CameraPose current_pose;
+                    visual_odometry_->processFrame(processed_frame, depth_for_vo, current_pose);
+                }
+            }
+            
             // Point cloud construction (temporarily disabled)
             double cloud_time = 0.0;
             // if (depth.valid && !depth.depth_map.empty()) {
@@ -381,6 +430,7 @@ private:
     std::unique_ptr<ImageProcessor> image_processor_;
     std::unique_ptr<PoseEstimator> pose_estimator_;
     std::unique_ptr<DepthEstimator> depth_estimator_;
+    std::unique_ptr<VisualOdometry> visual_odometry_;
     // PCL-dependent members temporarily disabled
     // std::unique_ptr<PointCloudBuilder> point_cloud_builder_;
     // std::unique_ptr<IntestinalReconstructor> intestinal_reconstructor_;

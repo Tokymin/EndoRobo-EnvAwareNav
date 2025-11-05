@@ -91,6 +91,10 @@ set(RECONSTRUCTION_SOURCES
     # src/reconstruction/redundancy_remover.cpp
 )
 
+set(NAVIGATION_SOURCES
+    src/navigation/visual_odometry.cpp
+)
+
 set(UTILS_SOURCES
     src/utils/timer.cpp
     src/utils/math_utils.cpp
@@ -101,6 +105,7 @@ add_library(endorobo_core STATIC
     ${CORE_SOURCES}
     ${CAMERA_SOURCES}
     ${PYTHON_INTERFACE_SOURCES}
+    ${NAVIGATION_SOURCES}
     ${RECONSTRUCTION_SOURCES}
     ${UTILS_SOURCES}
 )
