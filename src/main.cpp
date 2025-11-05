@@ -158,14 +158,25 @@ public:
     void run() {
         const auto& vis_config = config_manager_.getVisualizationConfig();
         
+        // Create and position windows in a row
+        const int window_width = 640;
+        const int window_height = 480;
+        const int window_spacing = 10;
+        
         if (vis_config.show_camera_feed) {
             cv::namedWindow("Camera Feed", cv::WINDOW_NORMAL);
+            cv::resizeWindow("Camera Feed", window_width, window_height);
+            cv::moveWindow("Camera Feed", 0, 50);
         }
         if (vis_config.show_depth_map) {
             cv::namedWindow("Depth Map", cv::WINDOW_NORMAL);
+            cv::resizeWindow("Depth Map", window_width, window_height);
+            cv::moveWindow("Depth Map", window_width + window_spacing, 50);
         }
         // Always show trajectory window
         cv::namedWindow("Camera Trajectory", cv::WINDOW_NORMAL);
+        cv::resizeWindow("Camera Trajectory", window_width, window_height);
+        cv::moveWindow("Camera Trajectory", (window_width + window_spacing) * 2, 50);
         
         LOG_INFO("Press 'q' to quit, 's' to save reconstruction, 'r' to reset trajectory");
         
@@ -186,15 +197,19 @@ public:
                         display_frame = visual_odometry_->drawFeatures(display_frame);
                     }
                     
-                    // Add info text
-                    std::string info = "Frame: " + std::to_string(frame_count_) +
-                                      " | FPS: " + std::to_string(static_cast<int>(camera_->getFPS()));
-                    if (visual_odometry_) {
-                        info += " | Features: " + std::to_string(visual_odometry_->getTrackedFeatureCount());
-                        info += " | Distance: " + std::to_string(static_cast<int>(visual_odometry_->getDistanceTraveled() * 100)) + "cm";
-                    }
-                    cv::putText(display_frame, info, cv::Point(10, 30),
+                    // Add info text - Line 1: Frame and FPS (Green)
+                    std::string info_line1 = "Frame: " + std::to_string(frame_count_) +
+                                            " | FPS: " + std::to_string(static_cast<int>(camera_->getFPS()));
+                    cv::putText(display_frame, info_line1, cv::Point(10, 30),
                                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+                    
+                    // Add info text - Line 2: Features and Distance (Yellow)
+                    if (visual_odometry_) {
+                        std::string info_line2 = "Features: " + std::to_string(visual_odometry_->getTrackedFeatureCount()) +
+                                                " | Distance: " + std::to_string(static_cast<int>(visual_odometry_->getDistanceTraveled() * 100)) + "cm";
+                        cv::putText(display_frame, info_line2, cv::Point(10, 65),
+                                   cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
+                    }
                     
                     cv::imshow("Camera Feed", display_frame);
                 }

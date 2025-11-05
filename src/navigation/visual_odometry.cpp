@@ -359,11 +359,7 @@ cv::Mat VisualOdometry::drawFeatures(const cv::Mat& image) const {
         }
     }
     
-    // Add text info
-    std::stringstream ss;
-    ss << "Features: " << current_points_.size() << " | Inliers: " << last_inlier_count_;
-    cv::putText(output, ss.str(), cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 
-                0.6, cv::Scalar(0, 255, 0), 2);
+    // Text info is now drawn in main.cpp to avoid overlap
     
     return output;
 }
