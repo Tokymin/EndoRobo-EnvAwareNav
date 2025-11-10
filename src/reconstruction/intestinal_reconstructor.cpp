@@ -7,6 +7,7 @@
 #include <pcl/surface/gp3.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/common/common.h>
 
 namespace endorobo {
 

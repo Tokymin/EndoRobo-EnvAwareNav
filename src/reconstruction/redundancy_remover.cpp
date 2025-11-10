@@ -16,7 +16,7 @@ RedundancyRemover::RedundancyRemover(const RedundancyRemovalConfig& config)
 RedundancyRemover::~RedundancyRemover() {
 }
 
-PointCloudBuilder::PointCloudType::Ptr RedundancyRemover::process(PointCloudType::Ptr input) {
+RedundancyRemover::PointCloudType::Ptr RedundancyRemover::process(PointCloudType::Ptr input) {
     if (!input || input->empty()) {
         LOG_WARNING("Input cloud is empty");
         return input;
