@@ -15,7 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # 编译选项
 if(MSVC)
-    add_compile_options(/W4 /WX-)
+    add_compile_options(/W4 /WX- /utf-8)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
     add_compile_options(-Wall -Wextra -pedantic)
@@ -311,7 +311,29 @@ if(PCL_FOUND)
         target_link_libraries(test_pcl ${PCL_IO_LIBRARY})
     endif()
     
-    message(STATUS "PCL test programs 'test_pcl' and 'test_pcl_simple' added")
+    # Reconstruction test (no IO dependencies, avoids OpenNI2)
+    add_executable(test_pcl_reconstruction
+        test_pcl_reconstruction.cpp
+    )
+    
+    target_include_directories(test_pcl_reconstruction PRIVATE
+        ${PCL_INCLUDE_DIRS}
+        ${EIGEN3_INCLUDE_DIRS}
+    )
+    
+    target_link_libraries(test_pcl_reconstruction
+        ${PCL_LIBRARIES}
+        Eigen3::Eigen
+    )
+    
+    if(PCL_COMMON_LIBRARY)
+        target_link_libraries(test_pcl_reconstruction ${PCL_COMMON_LIBRARY})
+    endif()
+    if(PCL_FILTERS_LIBRARY)
+        target_link_libraries(test_pcl_reconstruction ${PCL_FILTERS_LIBRARY})
+    endif()
+    
+    message(STATUS "PCL test programs 'test_pcl', 'test_pcl_simple', and 'test_pcl_reconstruction' added")
 endif()
 
 # 安装规则

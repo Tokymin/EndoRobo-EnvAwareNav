@@ -1,7 +1,11 @@
 #pragma once
 
+// Include logger.h first to prevent PCL namespace pollution
+#include "core/logger.h"
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/PolygonMesh.h>
 #include <memory>
 #include <vector>
 #include "core/config_manager.h"
@@ -59,7 +63,7 @@ public:
      * @brief 表面重建
      * @return 重建的网格表面
      */
-    pcl::PolygonMeshPtr reconstructSurface();
+    pcl::PolygonMesh::Ptr reconstructSurface();
     
     /**
      * @brief 平滑点云

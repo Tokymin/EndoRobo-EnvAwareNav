@@ -39,6 +39,21 @@ bool PythonWrapper::initialize(const std::string& python_path) {
         return false;
     }
     
+    // 添加 python_models 目录到 sys.path
+    PyObject* sys = PyImport_ImportModule("sys");
+    if (sys) {
+        PyObject* sys_path = PyObject_GetAttrString(sys, "path");
+        if (sys_path && PyList_Check(sys_path)) {
+            // 添加项目根目录下的 python_models 目录
+            PyObject* python_models_path = PyUnicode_FromString("python_models");
+            PyList_Insert(sys_path, 0, python_models_path);  // 插入到开头优先搜索
+            Py_DECREF(python_models_path);
+            LOG_INFO("Added 'python_models' to Python search path");
+            Py_DECREF(sys_path);
+        }
+        Py_DECREF(sys);
+    }
+    
     // 初始化NumPy
     if (!initializeNumpy()) {
         LOG_ERROR("Failed to initialize NumPy");

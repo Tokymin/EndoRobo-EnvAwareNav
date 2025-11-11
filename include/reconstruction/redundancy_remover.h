@@ -1,5 +1,8 @@
 #pragma once
 
+// Include logger.h first to prevent PCL namespace pollution
+#include "core/logger.h"
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <memory>
@@ -33,7 +36,7 @@ public:
      * @param output 输出点云
      * @return 去除的点数
      */
-    int removeRedundancy(PointCloudType::Ptr input, PointCloudType::Ptr output);
+    int removeRedundancy(PointCloudType::Ptr input, PointCloudType::Ptr out_cloud);
     
     /**
      * @brief 统计离群点去除
@@ -41,7 +44,7 @@ public:
      * @param output 输出点云
      * @return 去除的点数
      */
-    int removeStatisticalOutliers(PointCloudType::Ptr input, PointCloudType::Ptr output);
+    int removeStatisticalOutliers(PointCloudType::Ptr input, PointCloudType::Ptr out_cloud);
     
     /**
      * @brief 半径离群点去除
@@ -52,7 +55,7 @@ public:
      * @return 去除的点数
      */
     int removeRadiusOutliers(PointCloudType::Ptr input,
-                            PointCloudType::Ptr output,
+                            PointCloudType::Ptr out_cloud,
                             double radius,
                             int min_neighbors);
     
@@ -62,7 +65,7 @@ public:
      * @param output 输出点云
      * @return 去除的点数
      */
-    int removeDuplicatePoints(PointCloudType::Ptr input, PointCloudType::Ptr output);
+    int removeDuplicatePoints(PointCloudType::Ptr input, PointCloudType::Ptr out_cloud);
     
     /**
      * @brief 基于法向量一致性的点去除
@@ -70,7 +73,7 @@ public:
      * @param output 输出点云
      * @return 去除的点数
      */
-    int removeByNormalConsistency(PointCloudType::Ptr input, PointCloudType::Ptr output);
+    int removeByNormalConsistency(PointCloudType::Ptr input, PointCloudType::Ptr out_cloud);
     
     /**
      * @brief 自适应体素滤波
@@ -78,7 +81,7 @@ public:
      * @param output 输出点云
      * @return 去除的点数
      */
-    int adaptiveVoxelFilter(PointCloudType::Ptr input, PointCloudType::Ptr output);
+    int adaptiveVoxelFilter(PointCloudType::Ptr input, PointCloudType::Ptr out_cloud);
     
     /**
      * @brief 完整的冗余去除流程

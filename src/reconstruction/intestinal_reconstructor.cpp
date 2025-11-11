@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 #include "reconstruction/intestinal_reconstructor.h"
 #include "core/logger.h"
 #include <pcl/filters/statistical_outlier_removal.h>
@@ -8,6 +9,9 @@
 #include <pcl/features/normal_3d.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/common/common.h>
+#include <pcl/common/io.h>
+#include <cmath>
+#include <limits>
 
 namespace endorobo {
 
@@ -56,7 +60,7 @@ bool IntestinalReconstructor::addFrame(PointCloudType::Ptr cloud, const PoseEsti
     return true;
 }
 
-PointCloudBuilder::PointCloudType::Ptr IntestinalReconstructor::getProcessedCloud() {
+IntestinalReconstructor::PointCloudType::Ptr IntestinalReconstructor::getProcessedCloud() {
     if (accumulated_cloud_->empty()) {
         LOG_WARNING("No accumulated cloud data");
         return accumulated_cloud_;
@@ -82,7 +86,7 @@ PointCloudBuilder::PointCloudType::Ptr IntestinalReconstructor::getProcessedClou
     return smoothed;
 }
 
-PointCloudBuilder::PointCloudType::Ptr IntestinalReconstructor::smoothCloud(
+IntestinalReconstructor::PointCloudType::Ptr IntestinalReconstructor::smoothCloud(
     PointCloudType::Ptr cloud) {
     
     if (cloud->empty()) {
@@ -112,8 +116,8 @@ PointCloudBuilder::PointCloudType::Ptr IntestinalReconstructor::smoothCloud(
     }
 }
 
-pcl::PolygonMeshPtr IntestinalReconstructor::reconstructSurface() {
-    pcl::PolygonMeshPtr mesh(new pcl::PolygonMesh());
+pcl::PolygonMesh::Ptr IntestinalReconstructor::reconstructSurface() {
+    pcl::PolygonMesh::Ptr mesh(new pcl::PolygonMesh());
     
     if (accumulated_cloud_->empty()) {
         LOG_ERROR("Cannot reconstruct surface from empty cloud");
@@ -132,7 +136,23 @@ pcl::PolygonMeshPtr IntestinalReconstructor::reconstructSurface() {
     // 合并点和法向量
     pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr cloud_with_normals(
         new pcl::PointCloud<pcl::PointXYZRGBNormal>());
-    pcl::concatenateFields(*cloud, *normals, *cloud_with_normals);
+    cloud_with_normals->points.resize(cloud->points.size());
+    for (size_t i = 0; i < cloud->points.size(); ++i) {
+        cloud_with_normals->points[i].x = cloud->points[i].x;
+        cloud_with_normals->points[i].y = cloud->points[i].y;
+        cloud_with_normals->points[i].z = cloud->points[i].z;
+        cloud_with_normals->points[i].r = cloud->points[i].r;
+        cloud_with_normals->points[i].g = cloud->points[i].g;
+        cloud_with_normals->points[i].b = cloud->points[i].b;
+        if (i < normals->points.size()) {
+            cloud_with_normals->points[i].normal_x = normals->points[i].normal_x;
+            cloud_with_normals->points[i].normal_y = normals->points[i].normal_y;
+            cloud_with_normals->points[i].normal_z = normals->points[i].normal_z;
+        }
+    }
+    cloud_with_normals->width = cloud->width;
+    cloud_with_normals->height = cloud->height;
+    cloud_with_normals->is_dense = cloud->is_dense;
     
     // 使用贪婪投影三角化
     pcl::GreedyProjectionTriangulation<pcl::PointXYZRGBNormal> gp3;

@@ -2,21 +2,29 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+
+// Include logger.h FIRST to prevent any namespace pollution
+#include "core/logger.h"
+
 #include <opencv2/opencv.hpp>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "core/config_manager.h"
-#include "core/logger.h"
 #include "camera/camera_capture.h"
 #include "camera/image_processor.h"
 #include "python_interface/python_wrapper.h"
 #include "python_interface/pose_estimator.h"
 #include "python_interface/depth_estimator.h"
 #include "navigation/visual_odometry.h"
-// PCL-dependent headers temporarily disabled
+#include "utils/timer.h"
+// PCL-dependent headers temporarily disabled to avoid namespace pollution
+// TODO: Fix PCL integration and re-enable 3D reconstruction
 // #include "reconstruction/point_cloud_builder.h"
 // #include "reconstruction/intestinal_reconstructor.h"
 // #include "reconstruction/redundancy_remover.h"
-#include "utils/timer.h"
+// #include <pcl/io/pcd_io.h>
 
 using namespace endorobo;
 
@@ -101,14 +109,22 @@ public:
             LOG_INFO("Visual odometry initialized successfully");
         }
         
-        // PCL-dependent initialization temporarily disabled
-        // point_cloud_builder_ = std::make_unique<PointCloudBuilder>();
-        // intestinal_reconstructor_ = std::make_unique<IntestinalReconstructor>(
-        //     config_manager_.getReconstructionConfig());
-        // redundancy_remover_ = std::make_unique<RedundancyRemover>(
-        //     config_manager_.getReconstructionConfig().redundancy_removal);
+        // PCL-dependent initialization (temporarily disabled)
+        // TODO: Re-enable when PCL namespace issues are resolved
+        /*
+        point_cloud_builder_ = std::make_unique<PointCloudBuilder>();
+        intestinal_reconstructor_ = std::make_unique<IntestinalReconstructor>(
+            config_manager_.getReconstructionConfig());
+        redundancy_remover_ = std::make_unique<RedundancyRemover>(
+            config_manager_.getReconstructionConfig().redundancy_removal);
         
-        LOG_WARNING("3D reconstruction features disabled (PCL not available)");
+        if (intestinal_reconstructor_->initialize()) {
+            LOG_INFO("3D reconstruction features initialized successfully");
+        } else {
+            LOG_WARNING("Failed to initialize 3D reconstruction features");
+        }
+        */
+        LOG_WARNING("3D reconstruction features temporarily disabled");
         
         LOG_INFO("Application initialized successfully");
         return true;
@@ -387,19 +403,30 @@ private:
                 }
             }
             
-            // Point cloud construction (temporarily disabled)
+            // Point cloud construction (use latest depth map if available)
             double cloud_time = 0.0;
-            // if (depth.valid && !depth.depth_map.empty()) {
-            //     frame_timer.start("point_cloud");
-            //     const auto& cam_config = config_manager_.getCameraConfig();
-            //     auto cloud = point_cloud_builder_->createPointCloud(
-            //         depth.depth_map, processed_frame, pose,
-            //         cam_config.fx, cam_config.fy, cam_config.cx, cam_config.cy);
-            //     if (cloud && !cloud->empty()) {
-            //         intestinal_reconstructor_->addFrame(cloud, pose);
-            //     }
-            //     cloud_time = frame_timer.stop("point_cloud");
-            // }
+            cv::Mat depth_for_cloud;
+            {
+                std::lock_guard<std::mutex> lock(display_mutex_);
+                if (!latest_depth_.empty()) {
+                    depth_for_cloud = latest_depth_.clone();
+                }
+            }
+            
+            // PCL-dependent code temporarily disabled
+            /*
+            if (!depth_for_cloud.empty() && pose.valid) {
+                frame_timer.start("point_cloud");
+                const auto& cam_config = config_manager_.getCameraConfig();
+                auto cloud = point_cloud_builder_->createPointCloud(
+                    depth_for_cloud, processed_frame, pose,
+                    cam_config.fx, cam_config.fy, cam_config.cx, cam_config.cy);
+                if (cloud && !cloud->empty()) {
+                    intestinal_reconstructor_->addFrame(cloud, pose);
+                }
+                cloud_time = frame_timer.stop("point_cloud");
+            }
+            */
             
             // Save previous frame
             processed_frame.copyTo(previous_frame);
@@ -420,22 +447,44 @@ private:
     }
     
     void saveReconstruction() {
-        LOG_WARNING("Reconstruction save disabled (PCL not available)");
-        // auto cloud = intestinal_reconstructor_->getProcessedCloud();
-        // if (!cloud || cloud->empty()) {
-        //     LOG_WARNING("No reconstruction data to save");
-        //     return;
-        // }
-        // std::string cloud_filename = "reconstruction_" + 
-        //     std::to_string(std::time(nullptr)) + ".pcd";
-        // pcl::io::savePCDFileBinary(cloud_filename, *cloud);
-        // LOG_INFO("Point cloud saved to: ", cloud_filename);
+        // Temporarily disabled - PCL not available
+        LOG_WARNING("3D reconstruction temporarily disabled");
+        /*
+        if (!intestinal_reconstructor_) {
+            LOG_WARNING("Reconstruction not initialized");
+            return;
+        }
+        
+        auto cloud = intestinal_reconstructor_->getProcessedCloud();
+        if (!cloud || cloud->empty()) {
+            LOG_WARNING("No reconstruction data to save");
+            return;
+        }
+        
+        std::string cloud_filename = "reconstruction_" + 
+            std::to_string(std::time(nullptr)) + ".pcd";
+        
+        if (pcl::io::savePCDFileBinary(cloud_filename, *cloud) == 0) {
+            LOG_INFO("Point cloud saved to: ", cloud_filename);
+            LOG_INFO("Total points saved: ", cloud->size());
+        } else {
+            LOG_ERROR("Failed to save point cloud");
+        }
+        */
     }
     
     void resetReconstruction() {
-        LOG_WARNING("Reconstruction reset disabled (PCL not available)");
-        // intestinal_reconstructor_->reset();
-        // frame_count_ = 0;
+        // Temporarily disabled - PCL not available
+        LOG_WARNING("3D reconstruction temporarily disabled");
+        /*
+        if (!intestinal_reconstructor_) {
+            LOG_WARNING("Reconstruction not initialized");
+            return;
+        }
+        
+        intestinal_reconstructor_->reset();
+        LOG_INFO("Reconstruction reset");
+        */
     }
     
     ConfigManager config_manager_;
@@ -446,7 +495,7 @@ private:
     std::unique_ptr<PoseEstimator> pose_estimator_;
     std::unique_ptr<DepthEstimator> depth_estimator_;
     std::unique_ptr<VisualOdometry> visual_odometry_;
-    // PCL-dependent members temporarily disabled
+    // PCL-dependent members (temporarily disabled)
     // std::unique_ptr<PointCloudBuilder> point_cloud_builder_;
     // std::unique_ptr<IntestinalReconstructor> intestinal_reconstructor_;
     // std::unique_ptr<RedundancyRemover> redundancy_remover_;
@@ -469,9 +518,17 @@ private:
 };
 
 int main(int argc, char** argv) {
+    // Set console encoding to UTF-8 on Windows to avoid garbled characters
+#ifdef _WIN32
+    // Set console code page to UTF-8 (65001)
+    // This ensures Chinese and other Unicode characters display correctly
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+#endif
+    
     // Setup logging
-    Logger::getInstance().setLogLevel(LogLevel::INFO);
-    Logger::getInstance().setLogFile("endorobo.log");
+    endorobo::Logger::getInstance().setLogLevel(endorobo::LogLevel::INFO);
+    endorobo::Logger::getInstance().setLogFile("endorobo.log");
     
     // Parse command line arguments
     std::string config_file = "config/camera_config.yaml";

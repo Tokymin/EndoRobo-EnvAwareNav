@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 #include "reconstruction/redundancy_remover.h"
 #include "core/logger.h"
 #include <pcl/filters/statistical_outlier_removal.h>
@@ -5,7 +6,9 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/common/common.h>
 #include <unordered_set>
+#include <cmath>
 
 namespace endorobo {
 
@@ -52,18 +55,18 @@ RedundancyRemover::PointCloudType::Ptr RedundancyRemover::process(PointCloudType
     return output;
 }
 
-int RedundancyRemover::removeRedundancy(PointCloudType::Ptr input, PointCloudType::Ptr output) {
+int RedundancyRemover::removeRedundancy(PointCloudType::Ptr input, PointCloudType::Ptr out_cloud) {
     if (!input || input->empty()) {
         return 0;
     }
     
     int original_size = input->size();
-    output = process(input);
-    return original_size - output->size();
+    out_cloud = process(input);
+    return original_size - out_cloud->size();
 }
 
 int RedundancyRemover::removeStatisticalOutliers(PointCloudType::Ptr input,
-                                                 PointCloudType::Ptr output) {
+                                                 PointCloudType::Ptr out_cloud) {
     if (!input || input->empty()) {
         return 0;
     }
@@ -74,13 +77,13 @@ int RedundancyRemover::removeStatisticalOutliers(PointCloudType::Ptr input,
     sor.setInputCloud(input);
     sor.setMeanK(config_.nb_neighbors);
     sor.setStddevMulThresh(config_.std_ratio);
-    sor.filter(*output);
+    sor.filter(*out_cloud);
     
-    return original_size - output->size();
+    return original_size - out_cloud->size();
 }
 
 int RedundancyRemover::removeRadiusOutliers(PointCloudType::Ptr input,
-                                           PointCloudType::Ptr output,
+                                           PointCloudType::Ptr out_cloud,
                                            double radius,
                                            int min_neighbors) {
     if (!input || input->empty()) {
@@ -93,19 +96,19 @@ int RedundancyRemover::removeRadiusOutliers(PointCloudType::Ptr input,
     ror.setInputCloud(input);
     ror.setRadiusSearch(radius);
     ror.setMinNeighborsInRadius(min_neighbors);
-    ror.filter(*output);
+    ror.filter(*out_cloud);
     
-    return original_size - output->size();
+    return original_size - out_cloud->size();
 }
 
 int RedundancyRemover::removeDuplicatePoints(PointCloudType::Ptr input,
-                                            PointCloudType::Ptr output) {
+                                            PointCloudType::Ptr out_cloud) {
     if (!input || input->empty()) {
         return 0;
     }
     
     int original_size = input->size();
-    output->clear();
+    out_cloud->clear();
     
     // 使用KD树进行快速邻近搜索
     pcl::KdTreeFLANN<PointType> kdtree;
@@ -118,7 +121,7 @@ int RedundancyRemover::removeDuplicatePoints(PointCloudType::Ptr input,
         if (processed[i]) continue;
         
         const PointType& point = input->points[i];
-        output->points.push_back(point);
+        out_cloud->points.push_back(point);
         processed[i] = true;
         
         // 查找邻近点
@@ -134,15 +137,15 @@ int RedundancyRemover::removeDuplicatePoints(PointCloudType::Ptr input,
         }
     }
     
-    output->width = output->size();
-    output->height = 1;
-    output->is_dense = true;
+    out_cloud->width = out_cloud->size();
+    out_cloud->height = 1;
+    out_cloud->is_dense = true;
     
-    return original_size - output->size();
+    return original_size - out_cloud->size();
 }
 
 int RedundancyRemover::removeByNormalConsistency(PointCloudType::Ptr input,
-                                                PointCloudType::Ptr output) {
+                                                PointCloudType::Ptr out_cloud) {
     if (!input || input->empty()) {
         return 0;
     }
@@ -166,7 +169,7 @@ int RedundancyRemover::removeByNormalConsistency(PointCloudType::Ptr input,
     double angle_threshold_rad = config_.normal_angle_threshold * M_PI / 180.0;
     double cos_threshold = std::cos(angle_threshold_rad);
     
-    output->clear();
+    out_cloud->clear();
     for (size_t i = 0; i < input->size(); ++i) {
         const PointType& point = input->points[i];
         const pcl::Normal& normal = normals->points[i];
@@ -203,19 +206,19 @@ int RedundancyRemover::removeByNormalConsistency(PointCloudType::Ptr input,
         
         // 如果有足够多的一致邻居，保留该点
         if (consistent_neighbors >= static_cast<int>(indices.size()) / 2) {
-            output->points.push_back(point);
+            out_cloud->points.push_back(point);
         }
     }
     
-    output->width = output->size();
-    output->height = 1;
-    output->is_dense = true;
+    out_cloud->width = out_cloud->size();
+    out_cloud->height = 1;
+    out_cloud->is_dense = true;
     
-    return original_size - output->size();
+    return original_size - out_cloud ->size();
 }
 
 int RedundancyRemover::adaptiveVoxelFilter(PointCloudType::Ptr input,
-                                          PointCloudType::Ptr output) {
+                                          PointCloudType::Ptr out_cloud) {
     if (!input || input->empty()) {
         return 0;
     }
@@ -239,9 +242,9 @@ int RedundancyRemover::adaptiveVoxelFilter(PointCloudType::Ptr input,
     vg.setLeafSize(config_.distance_threshold, 
                    config_.distance_threshold, 
                    config_.distance_threshold);
-    vg.filter(*output);
+    vg.filter(*out_cloud);
     
-    return original_size - output->size();
+    return original_size - out_cloud->size();
 }
 
 std::vector<double> RedundancyRemover::computeLocalDensity(PointCloudType::Ptr cloud) {

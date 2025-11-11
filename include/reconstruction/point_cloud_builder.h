@@ -1,5 +1,8 @@
 #pragma once
 
+// Include logger.h first to prevent PCL namespace pollution
+#include "core/logger.h"
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <Eigen/Dense>
