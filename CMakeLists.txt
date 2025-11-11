@@ -131,7 +131,7 @@ if(NOT PCL_FOUND)
     endforeach()
 endif()
 
-find_package(PCL 1.9 QUIET COMPONENTS common io filters visualization)
+find_package(PCL 1.9 QUIET COMPONENTS common io filters visualization surface features)
 if(NOT PCL_FOUND)
     message(WARNING "PCL not found - 3D reconstruction features will be disabled")
     message(WARNING "Installation options:")

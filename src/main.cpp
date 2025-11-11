@@ -8,6 +8,7 @@
 
 #include <opencv2/opencv.hpp>
 #ifdef _WIN32
+#define NOMINMAX  // Prevent Windows.h from defining min/max macros that conflict with std::min/max
 #include <windows.h>
 #endif
 
@@ -19,12 +20,11 @@
 #include "python_interface/depth_estimator.h"
 #include "navigation/visual_odometry.h"
 #include "utils/timer.h"
-// PCL-dependent headers temporarily disabled to avoid namespace pollution
-// TODO: Fix PCL integration and re-enable 3D reconstruction
-// #include "reconstruction/point_cloud_builder.h"
-// #include "reconstruction/intestinal_reconstructor.h"
-// #include "reconstruction/redundancy_remover.h"
-// #include <pcl/io/pcd_io.h>
+// PCL integration - Stage 3: Complete integration
+#include "reconstruction/point_cloud_builder.h"
+#include "reconstruction/intestinal_reconstructor.h"
+#include "reconstruction/redundancy_remover.h"
+#include <pcl/io/pcd_io.h>
 
 using namespace endorobo;
 
@@ -109,22 +109,24 @@ public:
             LOG_INFO("Visual odometry initialized successfully");
         }
         
-        // PCL-dependent initialization (temporarily disabled)
-        // TODO: Re-enable when PCL namespace issues are resolved
-        /*
+        // PCL initialization - Stage 3: Complete integration
         point_cloud_builder_ = std::make_unique<PointCloudBuilder>();
+        LOG_INFO("PointCloudBuilder initialized");
+        
         intestinal_reconstructor_ = std::make_unique<IntestinalReconstructor>(
             config_manager_.getReconstructionConfig());
-        redundancy_remover_ = std::make_unique<RedundancyRemover>(
-            config_manager_.getReconstructionConfig().redundancy_removal);
         
         if (intestinal_reconstructor_->initialize()) {
-            LOG_INFO("3D reconstruction features initialized successfully");
+            LOG_INFO("IntestinalReconstructor initialized successfully");
         } else {
-            LOG_WARNING("Failed to initialize 3D reconstruction features");
+            LOG_WARNING("Failed to initialize IntestinalReconstructor");
         }
-        */
-        LOG_WARNING("3D reconstruction features temporarily disabled");
+        
+        redundancy_remover_ = std::make_unique<RedundancyRemover>(
+            config_manager_.getReconstructionConfig().redundancy_removal);
+        LOG_INFO("RedundancyRemover initialized");
+        
+        LOG_INFO("Stage 3: PCL integration complete - All reconstruction features ready");
         
         LOG_INFO("Application initialized successfully");
         return true;
@@ -413,9 +415,8 @@ private:
                 }
             }
             
-            // PCL-dependent code temporarily disabled
-            /*
-            if (!depth_for_cloud.empty() && pose.valid) {
+            // PCL point cloud construction - Stage 3 enabled
+            if (!depth_for_cloud.empty() && pose.valid && point_cloud_builder_ && intestinal_reconstructor_) {
                 frame_timer.start("point_cloud");
                 const auto& cam_config = config_manager_.getCameraConfig();
                 auto cloud = point_cloud_builder_->createPointCloud(
@@ -426,7 +427,6 @@ private:
                 }
                 cloud_time = frame_timer.stop("point_cloud");
             }
-            */
             
             // Save previous frame
             processed_frame.copyTo(previous_frame);
@@ -447,9 +447,7 @@ private:
     }
     
     void saveReconstruction() {
-        // Temporarily disabled - PCL not available
-        LOG_WARNING("3D reconstruction temporarily disabled");
-        /*
+        // Stage 3: PCD file saving enabled
         if (!intestinal_reconstructor_) {
             LOG_WARNING("Reconstruction not initialized");
             return;
@@ -470,13 +468,10 @@ private:
         } else {
             LOG_ERROR("Failed to save point cloud");
         }
-        */
     }
     
     void resetReconstruction() {
-        // Temporarily disabled - PCL not available
-        LOG_WARNING("3D reconstruction temporarily disabled");
-        /*
+        // Stage 3: Reconstruction reset enabled
         if (!intestinal_reconstructor_) {
             LOG_WARNING("Reconstruction not initialized");
             return;
@@ -484,7 +479,6 @@ private:
         
         intestinal_reconstructor_->reset();
         LOG_INFO("Reconstruction reset");
-        */
     }
     
     ConfigManager config_manager_;
@@ -495,10 +489,10 @@ private:
     std::unique_ptr<PoseEstimator> pose_estimator_;
     std::unique_ptr<DepthEstimator> depth_estimator_;
     std::unique_ptr<VisualOdometry> visual_odometry_;
-    // PCL-dependent members (temporarily disabled)
-    // std::unique_ptr<PointCloudBuilder> point_cloud_builder_;
-    // std::unique_ptr<IntestinalReconstructor> intestinal_reconstructor_;
-    // std::unique_ptr<RedundancyRemover> redundancy_remover_;
+    // PCL members - Stage 3: Complete integration
+    std::unique_ptr<PointCloudBuilder> point_cloud_builder_;
+    std::unique_ptr<IntestinalReconstructor> intestinal_reconstructor_;
+    std::unique_ptr<RedundancyRemover> redundancy_remover_;
     
     std::atomic<bool> running_;
     std::thread processing_thread_;
