@@ -2,6 +2,8 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <cmath>
+#include <filesystem>
 
 // Include logger.h FIRST to prevent any namespace pollution
 #include "core/logger.h"
@@ -25,6 +27,11 @@
 #include "reconstruction/intestinal_reconstructor.h"
 #include "reconstruction/redundancy_remover.h"
 #include <pcl/io/pcd_io.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/visualization/point_cloud_color_handlers.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/filter.h>
+#include <pcl/common/common.h>
 
 using namespace endorobo;
 
@@ -38,7 +45,10 @@ public:
         , running_(false)
         , frame_count_(0)
         , depth_running_(false)
-        , depth_frame_ready_(false) {
+        , depth_frame_ready_(false)
+        , visualization_running_(false)
+        , visualization_cloud_(nullptr)
+        , cloud_exported_(false) {
     }
     
     ~EndoRoboApp() {
@@ -50,6 +60,8 @@ public:
         LOG_INFO("EndoRobo Environment-Aware Navigation");
         LOG_INFO("========================================");
         
+        cloud_exported_.store(false);
+
         // Load configuration
         if (!config_manager_.loadConfig()) {
             LOG_ERROR("Failed to load configuration");
@@ -148,6 +160,13 @@ public:
             LOG_INFO("Depth estimation thread started");
         }
         
+        // Start PCL visualization thread
+        if (intestinal_reconstructor_) {
+            visualization_running_ = true;
+            visualization_thread_ = std::thread(&EndoRoboApp::visualizationLoop, this);
+            LOG_INFO("Point cloud visualization thread started");
+        }
+        
         LOG_INFO("Application started");
         return true;
     }
@@ -158,6 +177,7 @@ public:
         LOG_INFO("Stopping application...");
         running_ = false;
         depth_running_ = false;
+        visualization_running_ = false;
         
         if (processing_thread_.joinable()) {
             processing_thread_.join();
@@ -165,6 +185,15 @@ public:
         
         if (depth_thread_.joinable()) {
             depth_thread_.join();
+        }
+        
+        if (visualization_thread_.joinable()) {
+            // Close PCL viewer window
+            if (pcl_viewer_) {
+                pcl_viewer_->close();
+            }
+            visualization_thread_.join();
+            LOG_INFO("Visualization thread stopped");
         }
         
         camera_->stopCapture();
@@ -334,6 +363,107 @@ private:
         LOG_INFO("Depth estimation loop ended. Total depth frames: ", depth_frame_count);
     }
     
+    void visualizationLoop() {
+        LOG_INFO("Point cloud visualization started");
+        
+        // Create PCL visualizer
+        pcl_viewer_ = pcl::visualization::PCLVisualizer::Ptr(
+            new pcl::visualization::PCLVisualizer("3D Reconstruction Viewer"));
+        
+        // Set background color
+        pcl_viewer_->setBackgroundColor(0.0, 0.0, 0.0);
+        
+        // Add coordinate system
+        pcl_viewer_->addCoordinateSystem(0.1);
+        
+        // Set camera position
+        pcl_viewer_->initCameraParameters();
+        pcl_viewer_->setCameraPosition(0, 0, -0.5, 0, -1, 0);
+        
+        bool cloud_added = false;
+        int update_count = 0;
+        
+        while (visualization_running_ && !pcl_viewer_->wasStopped()) {
+            // Update point cloud every 30 frames (approximately 1 second)
+            if (update_count % 30 == 0) {
+                PointCloudBuilder::PointCloudType::Ptr display_cloud;
+                {
+                    std::lock_guard<std::mutex> lock(cloud_mutex_);
+                    display_cloud = visualization_cloud_;
+                }
+
+                if (display_cloud && !display_cloud->empty()) {
+                    pcl::visualization::PointCloudColorHandlerRGBField<PointCloudBuilder::PointType> rgb(display_cloud);
+
+                    if (!cloud_added) {
+                        // First time adding cloud
+                        if (rgb.isCapable()) {
+                            pcl_viewer_->addPointCloud<PointCloudBuilder::PointType>(display_cloud, rgb, "reconstruction");
+                        } else {
+                            pcl::visualization::PointCloudColorHandlerCustom<PointCloudBuilder::PointType> single_color(
+                                display_cloud, 255, 255, 255);
+                            pcl_viewer_->addPointCloud<PointCloudBuilder::PointType>(display_cloud, single_color, "reconstruction");
+                        }
+                        pcl_viewer_->setPointCloudRenderingProperties(
+                            pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "reconstruction");
+                        cloud_added = true;
+
+                        PointCloudBuilder::PointType min_pt;
+                        PointCloudBuilder::PointType max_pt;
+                        pcl::getMinMax3D(*display_cloud, min_pt, max_pt);
+                        Eigen::Vector3f min_vec = min_pt.getVector3fMap();
+                        Eigen::Vector3f max_vec = max_pt.getVector3fMap();
+                        if (std::isfinite(min_vec.x()) && std::isfinite(min_vec.y()) && std::isfinite(min_vec.z()) &&
+                            std::isfinite(max_vec.x()) && std::isfinite(max_vec.y()) && std::isfinite(max_vec.z())) {
+                            Eigen::Vector3f center = 0.5f * (min_vec + max_vec);
+                            float diagonal = (max_vec - min_vec).norm();
+                            float distance = std::max(diagonal * 1.2f, 0.3f);
+                            float far_clip = std::max(distance * 5.0f, 1.0f);
+
+                            pcl_viewer_->setCameraPosition(
+                                center.x(), center.y(), center.z() + distance,
+                                center.x(), center.y(), center.z(),
+                                0.0, -1.0, 0.0);
+                            pcl_viewer_->setCameraClipDistances(0.01, far_clip);
+                        } else {
+                            // Use default camera position when bounds are invalid
+                            pcl_viewer_->setCameraPosition(0, 0, 3, 0, 0, 0, 0, -1, 0);
+                            pcl_viewer_->setCameraClipDistances(0.01, 100.0);
+                            LOG_WARNING("Invalid point cloud bounds, using default camera position");
+                        }
+
+                        if (!pcl_viewer_->contains("axes")) {
+                            pcl_viewer_->addCoordinateSystem(0.1, "axes");
+                        }
+                        LOG_INFO("Point cloud added to viewer (", display_cloud->size(), " points)");
+                    } else {
+                        // Update existing cloud
+                        if (rgb.isCapable()) {
+                            pcl_viewer_->updatePointCloud<PointCloudBuilder::PointType>(display_cloud, rgb, "reconstruction");
+                        } else {
+                            pcl::visualization::PointCloudColorHandlerCustom<PointCloudBuilder::PointType> single_color(
+                                display_cloud, 255, 255, 255);
+                            pcl_viewer_->updatePointCloud<PointCloudBuilder::PointType>(display_cloud, single_color, "reconstruction");
+                        }
+                    }
+
+                    // Update title with point count
+                    std::string title = "3D Reconstruction - " +
+                                      std::to_string(display_cloud->size()) + " points";
+                    pcl_viewer_->setWindowName(title);
+                }
+            }
+            
+            // Spin once to handle UI events
+            pcl_viewer_->spinOnce(33);  // ~30 FPS
+            update_count++;
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        }
+        
+        LOG_INFO("Point cloud visualization ended");
+    }
+    
     void processingLoop() {
         LOG_INFO("Processing loop started");
         
@@ -369,7 +499,7 @@ private:
             frame_timer.start("pose_estimation");
             if (pose_estimator_ && pose_estimator_->isInitialized()) {
                 if (!pose_estimator_->estimatePose(processed_frame, previous_frame, pose)) {
-                    LOG_DEBUG("Pose estimation failed, using identity");
+                    LOG_DEBUG("Pose estimation failed, will try visual odometry fallback");
                     pose.transformation = Eigen::Matrix4d::Identity();
                     pose.valid = false;
                 }
@@ -401,7 +531,19 @@ private:
                 
                 if (!depth_for_vo.empty()) {
                     CameraPose current_pose;
-                    visual_odometry_->processFrame(processed_frame, depth_for_vo, current_pose);
+                    if (visual_odometry_->processFrame(processed_frame, depth_for_vo, current_pose) && current_pose.valid) {
+                        pose.transformation = current_pose.getTransformMatrix();
+                        pose.translation = current_pose.position;
+                        pose.rotation = Eigen::Quaterniond(current_pose.rotation);
+                        pose.valid = true;
+                        
+                        // Debug: Log pose information
+                        if (frame_count_ % 30 == 0) {  // Log every 30 frames
+                            LOG_INFO("Visual Odometry Pose - Position: (", 
+                                current_pose.position.x(), ", ", current_pose.position.y(), ", ", current_pose.position.z(), ")");
+                            LOG_INFO("Pose valid: ", pose.valid);
+                        }
+                    }
                 }
             }
             
@@ -416,7 +558,8 @@ private:
             }
             
             // PCL point cloud construction - Stage 3 enabled
-            if (!depth_for_cloud.empty() && pose.valid && point_cloud_builder_ && intestinal_reconstructor_) {
+            // Build point cloud even if pose is invalid (for visualization)
+            if (!depth_for_cloud.empty() && point_cloud_builder_ && intestinal_reconstructor_) {
                 frame_timer.start("point_cloud");
                 const auto& cam_config = config_manager_.getCameraConfig();
                 auto cloud = point_cloud_builder_->createPointCloud(
@@ -424,6 +567,44 @@ private:
                     cam_config.fx, cam_config.fy, cam_config.cx, cam_config.cy);
                 if (cloud && !cloud->empty()) {
                     intestinal_reconstructor_->addFrame(cloud, pose);
+
+                    if (visualization_running_) {
+                        auto accumulated = intestinal_reconstructor_->getAccumulatedCloud();
+                        if (accumulated && !accumulated->empty()) {
+                            PointCloudBuilder::PointCloudType::Ptr display_cloud(
+                                new PointCloudBuilder::PointCloudType());
+
+                            if (accumulated->size() > 100000) {
+                                pcl::VoxelGrid<PointCloudBuilder::PointType> vg;
+                                vg.setInputCloud(accumulated);
+                                const float leaf_size = 0.003f;  // 3mm voxel size
+                                vg.setLeafSize(leaf_size, leaf_size, leaf_size);
+                                vg.filter(*display_cloud);
+                            } else {
+                                *display_cloud = *accumulated;
+                            }
+
+                            PointCloudBuilder::PointCloudType::Ptr filtered_cloud(
+                                new PointCloudBuilder::PointCloudType());
+                            std::vector<int> valid_indices;
+                            pcl::removeNaNFromPointCloud(*display_cloud, *filtered_cloud, valid_indices);
+
+                            if (!filtered_cloud->empty()) {
+                                exportPointCloudOnce(filtered_cloud); // Export the filtered cloud
+                                
+                                // Debug: Log point cloud bounds every 30 frames
+                                if (frame_count_ % 30 == 0) {
+                                    PointCloudBuilder::PointType min_pt, max_pt;
+                                    pcl::getMinMax3D(*filtered_cloud, min_pt, max_pt);
+                                    LOG_INFO("Point cloud bounds - Min: (", min_pt.x, ", ", min_pt.y, ", ", min_pt.z, 
+                                            ") Max: (", max_pt.x, ", ", max_pt.y, ", ", max_pt.z, ")");
+                                }
+                                
+                                std::lock_guard<std::mutex> lock(cloud_mutex_);
+                                visualization_cloud_ = filtered_cloud;
+                            }
+                        }
+                    }
                 }
                 cloud_time = frame_timer.stop("point_cloud");
             }
@@ -509,6 +690,35 @@ private:
     std::mutex display_mutex_;
     cv::Mat latest_frame_;
     cv::Mat latest_depth_;
+    
+    // PCL Visualization
+    std::thread visualization_thread_;
+    std::atomic<bool> visualization_running_;
+    pcl::visualization::PCLVisualizer::Ptr pcl_viewer_;
+    std::mutex cloud_mutex_;
+    PointCloudBuilder::PointCloudType::Ptr visualization_cloud_;
+    std::atomic<bool> cloud_exported_;
+
+    void exportPointCloudOnce(const PointCloudBuilder::PointCloudType::Ptr& cloud) {
+        if (cloud_exported_.load()) return;
+        if (!cloud || cloud->empty()) return;
+
+        std::error_code ec;
+        std::filesystem::create_directories("output", ec);
+        if (ec) {
+            LOG_WARNING("Failed to create output directory: ", ec.message());
+            return;
+        }
+
+        const std::string file_path = "output/latest_cloud.pcd";
+        int result = pcl::io::savePCDFileBinary(file_path, *cloud);
+        if (result == 0) {
+            LOG_INFO("Exported point cloud to ", file_path, " (", cloud->size(), " points)");
+            cloud_exported_.store(true);
+        } else {
+            LOG_ERROR("Failed to export point cloud to ", file_path, ", error code: ", result);
+        }
+    }
 };
 
 int main(int argc, char** argv) {

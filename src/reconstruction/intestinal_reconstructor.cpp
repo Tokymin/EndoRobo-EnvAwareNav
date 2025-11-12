@@ -39,9 +39,10 @@ bool IntestinalReconstructor::addFrame(PointCloudType::Ptr cloud, const PoseEsti
         return false;
     }
     
+    // Allow adding frames even with invalid pose for visualization
+    // (useful when pose estimator is not available)
     if (!pose.valid) {
-        LOG_WARNING("Invalid pose, skipping frame");
-        return false;
+        LOG_DEBUG("Invalid pose, adding cloud without transformation");
     }
     
     // 合并到累积点云

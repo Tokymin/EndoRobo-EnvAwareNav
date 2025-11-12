@@ -44,8 +44,8 @@ PointCloudBuilder::PointCloudType::Ptr PointCloudBuilder::createPointCloud(
             
             float depth = depth_map.at<float>(v, u);
             
-            // 跳过无效深度
-            if (depth <= 0.0f || std::isnan(depth) || std::isinf(depth)) {
+            // 跳过无效深度 - 添加合理范围检查
+            if (depth <= 0.0f || depth > 10.0f || std::isnan(depth) || std::isinf(depth)) {
                 pt.x = pt.y = pt.z = std::numeric_limits<float>::quiet_NaN();
                 continue;
             }
@@ -58,6 +58,14 @@ PointCloudBuilder::PointCloudType::Ptr PointCloudBuilder::createPointCloud(
             
             // 变换到世界坐标系
             Eigen::Vector3d point_world = transformPoint(point_camera, pose.transformation);
+            
+            // 检查变换后的坐标是否有效
+            if (std::isnan(point_world.x()) || std::isnan(point_world.y()) || std::isnan(point_world.z()) ||
+                std::isinf(point_world.x()) || std::isinf(point_world.y()) || std::isinf(point_world.z()) ||
+                std::abs(point_world.x()) > 100.0 || std::abs(point_world.y()) > 100.0 || std::abs(point_world.z()) > 100.0) {
+                pt.x = pt.y = pt.z = std::numeric_limits<float>::quiet_NaN();
+                continue;
+            }
             
             pt.x = static_cast<float>(point_world.x());
             pt.y = static_cast<float>(point_world.y());
