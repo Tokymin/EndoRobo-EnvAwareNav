@@ -11,11 +11,10 @@ PoseEstimator::PoseEstimator(const PythonModelConfig& config)
 }
 
 PoseEstimator::~PoseEstimator() {
-    if (predict_func_) {
-        Py_DECREF(predict_func_);
-    }
-    if (model_module_) {
-        Py_DECREF(model_module_);
+    if (Py_IsInitialized()) {
+        ScopedGILLock gil;
+        Py_XDECREF(predict_func_);
+        Py_XDECREF(model_module_);
     }
 }
 
@@ -28,6 +27,7 @@ bool PoseEstimator::initialize(std::shared_ptr<PythonWrapper> python_wrapper) {
     }
     
     python_wrapper_ = python_wrapper;
+    ScopedGILLock gil;
     
     // 加载位姿估计模型模块
     // 这里假设Python模块名为 "pose_model"
@@ -84,6 +84,12 @@ bool PoseEstimator::estimatePose(const cv::Mat& current_frame,
     
     // 预处理图像
     cv::Mat processed_current = preprocessImage(current_frame);
+    cv::Mat processed_previous;
+    if (!previous_frame.empty()) {
+        processed_previous = preprocessImage(previous_frame);
+    }
+    
+    ScopedGILLock gil;
     
     PyObject* pArgs = PyTuple_New(previous_frame.empty() ? 1 : 2);
     
@@ -93,7 +99,6 @@ bool PoseEstimator::estimatePose(const cv::Mat& current_frame,
     
     // 前一帧（如果有）
     if (!previous_frame.empty()) {
-        cv::Mat processed_previous = preprocessImage(previous_frame);
         PyObject* previous_numpy = python_wrapper_->matToNumpy(processed_previous);
         PyTuple_SetItem(pArgs, 1, previous_numpy);
     }

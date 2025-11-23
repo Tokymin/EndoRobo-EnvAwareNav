@@ -75,6 +75,7 @@ public:
 private:
     bool initialized_;
     PyObject* numpy_module_;
+    PyThreadState* main_thread_state_;
     
     /**
      * @brief 初始化NumPy
@@ -82,5 +83,19 @@ private:
     bool initializeNumpy();
 };
 
-} // namespace endorobo
+/**
+ * @brief RAII helper for acquiring and releasing the Python GIL
+ */
+class ScopedGILLock {
+public:
+    ScopedGILLock() {
+        state_ = PyGILState_Ensure();
+    }
+    ~ScopedGILLock() {
+        PyGILState_Release(state_);
+    }
+private:
+    PyGILState_STATE state_;
+};
 
+} // namespace endorobo

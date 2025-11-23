@@ -6,11 +6,16 @@ namespace endorobo {
 
 PythonWrapper::PythonWrapper()
     : initialized_(false)
-    , numpy_module_(nullptr) {
+    , numpy_module_(nullptr)
+    , main_thread_state_(nullptr) {
 }
 
 PythonWrapper::~PythonWrapper() {
     if (initialized_) {
+        if (main_thread_state_) {
+            PyEval_RestoreThread(main_thread_state_);
+            main_thread_state_ = nullptr;
+        }
         Py_XDECREF(numpy_module_);
         Py_Finalize();
         LOG_INFO("Python interpreter finalized");
@@ -60,6 +65,10 @@ bool PythonWrapper::initialize(const std::string& python_path) {
         Py_Finalize();
         return false;
     }
+    
+    // Release the GIL so other threads can acquire it later
+    PyEval_InitThreads();
+    main_thread_state_ = PyEval_SaveThread();
     
     initialized_ = true;
     LOG_INFO("Python interpreter initialized successfully");

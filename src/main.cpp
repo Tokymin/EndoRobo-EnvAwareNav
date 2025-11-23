@@ -509,8 +509,8 @@ private:
             }
             double pose_time = frame_timer.stop("pose_estimation");
             
-            // Submit depth estimation task asynchronously (every 10 frames)
-            if (depth_running_ && frame_count_ % 10 == 0) {
+            // Submit depth estimation task asynchronously (always keep latest frame ready)
+            if (depth_running_) {
                 std::lock_guard<std::mutex> lock(depth_input_mutex_);
                 // Only submit new frame if previous one is processed (avoid backlog)
                 if (!depth_frame_ready_) {

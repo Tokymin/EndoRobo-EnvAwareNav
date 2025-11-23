@@ -14,9 +14,12 @@ DepthEstimator::DepthEstimator(const PythonModelConfig& config,
 }
 
 DepthEstimator::~DepthEstimator() {
-    Py_XDECREF(predict_func_);
-    Py_XDECREF(model_module_);
-    Py_XDECREF(depth_model_);
+    if (Py_IsInitialized()) {
+        ScopedGILLock gil;
+        Py_XDECREF(predict_func_);
+        Py_XDECREF(model_module_);
+        Py_XDECREF(depth_model_);
+    }
 }
 
 bool DepthEstimator::initialize(std::shared_ptr<PythonWrapper> python_wrapper) {
@@ -28,6 +31,8 @@ bool DepthEstimator::initialize(std::shared_ptr<PythonWrapper> python_wrapper) {
     }
     
     python_wrapper_ = python_wrapper;
+    
+    ScopedGILLock gil;
     
     try {
         // 导入Depth Anything V2模块
