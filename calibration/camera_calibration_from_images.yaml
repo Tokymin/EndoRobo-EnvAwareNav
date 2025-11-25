@@ -1,0 +1,21 @@
+%YAML:1.0
+---
+image_width: 640
+image_height: 480
+board_width: 9
+board_height: 6
+square_size_mm: 25.
+camera_matrix: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 578.6855040462824, 0., 319.5, 0., 575.72007612883999, 239.5,
+       0., 0., 1. ]
+distortion_coefficients: !!opencv-matrix
+   rows: 1
+   cols: 5
+   dt: d
+   data: [ 0.12878272322536177, -0.16037330849939743,
+       0.00018000515939535632, 0.0092752339559126172,
+       0.022109604151092054 ]
+rms_reprojection_error: 0.34881448664618792

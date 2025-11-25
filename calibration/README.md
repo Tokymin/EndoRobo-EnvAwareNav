@@ -10,6 +10,7 @@ calibration/
 ├── CMakeLists.txt            # CMake构建文件
 ├── build_calibration.bat     # Windows编译脚本
 ├── generate_chessboard.py    # 棋盘格生成脚本
+├── quick_start.bat           # 一键式操作菜单
 ├── README.md                 # 本说明文件
 └── images/                   # 标定图像存储目录
 ```
@@ -28,6 +29,39 @@ calibration/
 3. **打印比例**: 必须100%比例打印，不可缩放
 4. **平整度**: 贴在硬质板上（如硬纸板、亚克力板）
 5. **光照**: 避免反光，确保对比度清晰
+
+## 快速启动（Windows）
+
+如果你已经打印好棋盘格并准备开始标定，在 `calibration` 目录下有两种方式可以启动标定程序：
+
+### 方式一：使用 `quick_start.bat`
+1. 打开 PowerShell 或 cmd：`cd F:\Toky\VSProject\Repos\EndoRobo-EnvAwareNav\calibration`
+2. 运行 `quick_start.bat`（也可以双击执行）
+3. 按提示依次选择：
+   - `[2]` 编译生成 `camera_calibration.exe`（若已存在可跳过）
+   - `[3]` 启动标定程序，按提示使用空格采集棋盘格的图像
+
+### 方式二：手动启动
+1. `cd F:\Toky\VSProject\Repos\EndoRobo-EnvAwareNav\calibration`
+2. 运行 `build_calibration.bat` 生成可执行文件（只需执行一次）
+3. 直接运行 `camera_calibration.exe`（可加参数指定相机ID，例如 `camera_calibration.exe 1`）
+4. 进入程序后，按空格采集至少10张含棋盘格的图像，再按 `C` 键计算标定结果
+
+## 使用已有图像进行离线标定
+
+若已通过 `camera_calibration.exe` 采集并保存了 `images/calib_*.jpg`，可以直接离线标定，无需重新启动交互界面：
+
+```bash
+cd F:\Toky\VSProject\Repos\EndoRobo-EnvAwareNav
+python calibration\calibrate_from_images.py
+```
+
+- 脚本会自动扫描 `calibration/images` 目录，统计可用图像数量并过滤无法检测到棋盘格的图像
+- 若全部有效图像少于10张会自动提示
+- 标定完成后结果保存在 `calibration/camera_calibration_from_images.yaml`，并在终端打印可写入 `config/camera_config.yaml` 的参数
+- 如图像目录不在默认位置，可通过 `--image-dir` 和 `--pattern` 参数指定
+
+Saved calibration to F:\Toky\VSProject\Repos\EndoRobo-EnvAwareNav\calibration\camera_calibration_from_images.yaml
 
 ## 使用步骤
 
@@ -64,23 +98,25 @@ camera_calibration.exe 1
 - **ESC键**: 退出采集
 - **C键**: 开始标定（需至少10张图像）
 
-### 5. 图像采集技巧
+图像采集技巧：
 - **数量**: 建议采集15-20张图像
 - **角度**: 从不同角度拍摄（正面、左右倾斜、上下倾斜）
 - **位置**: 棋盘格在图像中的不同位置（中心、边缘、角落）
 - **距离**: 不同距离（近距离、远距离）
 - **覆盖**: 确保棋盘格覆盖整个图像区域
 
-### 6. 标定质量评估
+标定质量评估：
 - **RMS误差**: 应小于1.0像素
 - **图像数量**: 至少10张，推荐15-20张
 - **角点检测**: 所有图像都应成功检测到角点
-
+### 5. 标定图像
+采集完成后按键盘上的`C` 键开始标定
 ## 标定结果
 
 标定完成后会生成：
 1. `camera_calibration.xml` - OpenCV格式的标定结果
 2. 控制台输出建议的配置参数
+
 
 ### 更新项目配置
 将标定结果更新到 `config/camera_config.yaml`：
