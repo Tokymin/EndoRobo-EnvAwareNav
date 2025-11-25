@@ -13,9 +13,17 @@ if %ERRORLEVEL% EQU 0 (
 cd /d F:\Toky\VSProject\Repos\EndoRobo-EnvAwareNav
 
 set PYTHONPATH=%CD%\python_models;%PYTHONHOME%\Lib;%PYTHONHOME%\Lib\site-packages
+set CONFIG_FILE=%CD%\config\camera_config.yaml
+
+if not exist "%CONFIG_FILE%" (
+    echo [ERROR] Cannot find %CONFIG_FILE%
+    pause
+    exit /b 1
+)
 
 if exist endorobo.log del endorobo.log
 
-.\build\bin\Release\endorobo_main.exe
+echo [INFO] Launching EndoRobo with config: %CONFIG_FILE%
+.\build\bin\Release\endorobo_main.exe "%CONFIG_FILE%"
 
 pause

@@ -1,365 +1,145 @@
 # EndoRobo-EnvAwareNav
 
-**内窥镜机器人环境感知导航系统**  
-Endoscopic Robot Environment-Aware Navigation System
+Endoscopic Robot Environment-Aware Navigation System（内窥镜机器人环境感知导航系统）。该项目面向肠腔等管状结构，提供实时图像采集、深度估计、位姿估计、点云/网格重建以及可视化能力，帮助研究人员快速验证环境感知算法。
 
-一个用于医疗内窥镜的实时环境重建和导航系统，专门针对肠腔等管状结构的3D重建。
+## 主要特性
+- 🚀 **实时多线程流水线**：相机采集、Python 深度推理、点云构建、冗余点去除、可视化独立线程运行
+- 🔍 **深度 & 位姿估计**：Python 接口封装深度学习模型，输出高质量深度图和相机轨迹
+- 🧱 **肠腔特定重建**：点云滤波、冗余去除、Greedy Projection Triangulation 表面重建
+- 🪟 **PCL 可视化**：实时点云/网格窗口 + 2D 图像/深度/轨迹窗口
+- 📷 **完整相机标定工具链**：棋盘格生成、图像采集、离线批量标定脚本
 
-## 项目简介
-
-本项目实现了一个完整的内窥镜环境感知系统，主要功能包括：
-
-- **实时图像采集**：从内窥镜摄像头实时获取RGB图像
-- **深度估计**：利用深度学习模型进行单目深度估计
-- **位姿估计**：估计内窥镜相机的实时位姿
-- **3D重建**：实时构建肠腔的三维点云模型
-- **冗余点去除**：智能过滤重复和离群点，优化重建质量
-- **可视化**：实时显示相机画面、深度图和3D重建结果
-
-## 系统架构
-
+## 仓库结构
 ```
 EndoRobo-EnvAwareNav/
-├── include/                    # 头文件
-│   ├── core/                   # 核心模块
-│   │   ├── config_manager.h    # 配置管理
-│   │   └── logger.h            # 日志系统
-│   ├── camera/                 # 相机模块
-│   │   ├── camera_capture.h    # 相机采集
-│   │   └── image_processor.h   # 图像预处理
-│   ├── python_interface/       # Python接口
-│   │   ├── python_wrapper.h    # Python包装器
-│   │   ├── pose_estimator.h    # 位姿估计
-│   │   └── depth_estimator.h   # 深度估计
-│   ├── reconstruction/         # 重建模块
-│   │   ├── point_cloud_builder.h         # 点云构建
-│   │   ├── intestinal_reconstructor.h    # 肠腔重建
-│   │   └── redundancy_remover.h          # 冗余点去除
-│   └── utils/                  # 工具类
-│       ├── timer.h             # 计时器
-│       └── math_utils.h        # 数学工具
-├── src/                        # 源文件
-├── config/                     # 配置文件
-│   └── camera_config.yaml      # 相机配置
-├── python_models/              # Python模型
-│   ├── pose_model.py           # 位姿估计模型
-│   ├── depth_model.py          # 深度估计模型
-│   └── requirements.txt        # Python依赖
-├── data/                       # 数据目录
-├── docs/                       # 文档
-└── CMakeLists.txt              # CMake配置
+├── calibration/                     # 相机标定工具（棋盘格、采集、离线标定脚本）
+│   ├── camera_calibration.exe       # Windows 可执行采集器（由项目构建）
+│   ├── calibrate_from_images.py     # 使用 images/calib_*.jpg 离线标定
+│   └── README.md                    # 标定详细说明
+├── config/
+│   └── camera_config.yaml           # 相机及可视化/重建配置（运行时加载）
+├── include/                         # C++ 头文件（core、camera、reconstruction 等）
+├── src/                             # C++ 源文件，入口为 src/main.cpp
+├── python_models/                   # Python 推理脚本与模型
+├── tools/                           # 辅助工具（例如 view_cloud.py）
+├── run_with_gui.bat                 # Windows 一键启动脚本（传入 camera_config.yaml）
+├── test_visualization.bat           # 仅启用 PCL 可视化的便捷脚本
+├── build/                           # CMake 构建输出（由用户生成）
+└── output/                          # 运行后保存的最新点云等结果
 ```
 
-## 依赖项
+## 环境准备
+### C++ 依赖
+- C++17 编译器（Visual Studio 2022 / g++ 9+）
+- CMake ≥ 3.15
+- OpenCV ≥ 4.5
+- Eigen3 ≥ 3.3
+- PCL ≥ 1.10（含 VTK/FLANN/Qhull 组件）
+- yaml-cpp
+- Python 3.8+（供深度模型推理使用）
 
-### C++依赖
+#### Windows 建议
+使用 [vcpkg](https://github.com/microsoft/vcpkg) 安装：
+```powershell
+.\vcpkg install opencv eigen3 pcl yaml-cpp --triplet x64-windows
+```
+并在 `cmake` 时指定 `-DCMAKE_TOOLCHAIN_FILE=[vcpkg root]/scripts/buildsystems/vcpkg.cmake`。
 
-- **C++17**或更高版本
-- **CMake** >= 3.15
-- **OpenCV** >= 4.5.0 - 图像处理和计算机视觉
-- **Eigen3** >= 3.3 - 线性代数运算
-- **PCL** >= 1.10 - 点云处理
-- **yaml-cpp** - YAML配置文件解析
-- **Python3** >= 3.7 - Python/C++互操作
-
-### Python依赖
-
+### Python 依赖
 ```bash
 pip install -r python_models/requirements.txt
 ```
+包含 PyTorch、opencv-python、numpy 等。
 
-主要包括：
-- PyTorch >= 1.10.0
-- OpenCV-Python >= 4.5.0
-- NumPy >= 1.21.0
-
-## 编译和安装
-
-### Windows (Visual Studio 2022)
-
-1. **安装依赖库**
-
-推荐使用 [vcpkg](https://github.com/microsoft/vcpkg) 安装依赖：
-
-```powershell
-# 安装 vcpkg
-git clone https://github.com/Microsoft/vcpkg.git
-cd vcpkg
-.\bootstrap-vcpkg.bat
-
-# 安装依赖库
-.\vcpkg install opencv:x64-windows
-.\vcpkg install eigen3:x64-windows
-.\vcpkg install pcl:x64-windows
-.\vcpkg install yaml-cpp:x64-windows
-```
-
-2. **生成Visual Studio项目**
-
+## 编译
+### Windows
 ```powershell
 mkdir build
 cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=[vcpkg root]/scripts/buildsystems/vcpkg.cmake
+cmake .. -G "Visual Studio 17 2022" -A x64 ^
+    -DCMAKE_TOOLCHAIN_FILE=[vcpkg root]/scripts/buildsystems/vcpkg.cmake
+cmake --build . --config Release
 ```
-
-3. **打开Visual Studio解决方案**
-
-```powershell
-start EndoRobo_EnvAwareNav.sln
-```
-
-在Visual Studio中编译项目。
+生成的 `build/bin/Release/endorobo_main.exe` 供运行脚本调用。
 
 ### Linux
-
-1. **安装依赖**
-
-```bash
-# Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install -y \
-    build-essential cmake \
-    libopencv-dev \
-    libeigen3-dev \
-    libpcl-dev \
-    libyaml-cpp-dev \
-    python3-dev
-
-# Arch Linux
-sudo pacman -S opencv eigen pcl yaml-cpp python
-```
-
-2. **编译**
-
 ```bash
 mkdir build && cd build
 cmake ..
-make -j$(nproc)
+cmake --build . -j$(nproc)
 ```
 
-## 配置
+## 相机标定流程
+1. **打印棋盘格**  
+   - 运行 `python calibration\generate_chessboard_simple.py` 生成 `chessboard_pattern.png` 并按 100% 比例打印（10×7 方格，9×6 内角点，25 mm 间距）。
+2. **采集图像**  
+   - `.\calibration\camera_calibration.exe`（或 `quick_start.bat` 菜单）实时采集，按 `SPACE` 保存照片，文件保存在 `calibration/images/calib_*.jpg`。
+3. **离线标定**  
+   - 采集 ≥10 张后运行：  
+     ```powershell
+     cd F:\Toky\VSProject\Repos\EndoRobo-EnvAwareNav
+     python calibration\calibrate_from_images.py
+     ```
+   - 结果保存到 `calibration/camera_calibration_from_images.yaml`，终端会打印 `fx/fy/cx/cy` 与畸变系数。
+4. **更新配置**  
+   - 将上述参数写入 `config/camera_config.yaml`（脚本 `run_with_gui.bat` 会自动加载此文件）。
 
-### 相机参数配置
+> 详见 `calibration/README.md` 获取更完整的标定指南和常见问题。
 
-编辑 `config/camera_config.yaml`：
+## 配置说明
+`config/camera_config.yaml` 是运行入口读取的唯一配置文件，除相机参数外还包含预处理、Python 模型、重建、性能、可视化等模块设置。启动脚本会检测该文件是否存在。
 
-```yaml
-camera:
-  width: 1920          # 相机分辨率宽度
-  height: 1080         # 相机分辨率高度
-  fps: 30              # 帧率
-  camera_id: 0         # 相机ID
-  
-  # 相机内参（需要标定）
-  intrinsics:
-    fx: 1000.0         # 焦距 x
-    fy: 1000.0         # 焦距 y
-    cx: 960.0          # 主点 x
-    cy: 540.0          # 主点 y
-  
-  # 畸变系数（需要标定）
-  distortion:
-    k1: 0.0
-    k2: 0.0
-    k3: 0.0
-    p1: 0.0
-    p2: 0.0
+## 运行与停止
+### 使用 GUI 脚本
+在 PowerShell 或 CMD 中（位于仓库根目录）：
+```powershell
+# 启动：加载最新相机参数，启动 GUI、点云与网格窗口
+.\run_with_gui.bat
+
+# 停止：在脚本窗口按 Ctrl+C，或执行
+taskkill /IM endorobo_main.exe /F
 ```
+`run_with_gui.bat` 会：
+1. 设置 Python/依赖环境变量。
+2. 验证 `config\camera_config.yaml` 是否存在。
+3. 删除旧的 `endorobo.log`。
+4. 以 `.\build\bin\Release\endorobo_main.exe config\camera_config.yaml` 形式启动程序。
 
-### Python模型配置
-
-1. 准备训练好的深度学习模型
-2. 将模型文件放在 `python_models/` 对应目录
-3. 在配置文件中指定模型路径
-
-详见 `python_models/README.md`
-
-## 使用方法
-
-### 基本使用
-
-```bash
-# 使用默认配置运行
-./build/bin/endorobo_main
-
-# 使用自定义配置
-./build/bin/endorobo_main config/my_config.yaml
+### 直接运行可执行文件
+```powershell
+.\build\bin\Release\endorobo_main.exe config\camera_config.yaml
 ```
+或使用 `test_visualization.bat` 快速打开 PCL 可视化并查看日志。
 
-### 可视化窗口详解
+## 实时显示内容
+- **Camera Feed**：左上角显示帧率和特征数量；绿色圆点表示检测到的特征点，黄色线段为帧间运动。
+- **Depth Map**：Depth Anything V2 单目深度结果，蓝→红代表由近及远。
+- **Camera Trajectory**：顶视图绘制相机轨迹，显示位姿、距离等统计信息。
+- **PCL Viewer**：`run_with_gui.bat` 启动后附带的独立窗口，展示实时点云/网格；支持坐标轴、点云大小、摄像机位置自适应。
 
-程序运行后会显示三个实时窗口（640×480，从左到右排列）：
+`output/latest_cloud.pcd` 会定期保存最近一次的点云，可通过 `python tools\view_cloud.py` 进行离线查看。
 
-#### 🎥 窗口 1: Camera Feed（相机图像）
-实时显示摄像头采集的 RGB 图像，并叠加视觉里程计的特征追踪可视化。
-
-**可视化元素**：
-- 🟢 **绿色圆点**：当前帧检测到的特征点（GFTT 角点）
-  - 数量：200-500 个
-  - 用途：用于追踪相机运动
-  
-- 🟡 **黄色线段（运动射线）**：特征点的运动轨迹
-  - 每条线段连接同一特征点在相邻两帧的位置
-  - **线段方向和长度的含义**：
-    - 静止场景：线段几乎看不到
-    - 相机向前：特征点从中心向外辐射（发散）
-    - 相机向后：特征点从外向中心汇聚（收敛）
-    - 相机旋转：特征点呈现旋转流场
-    - 相机平移：特征点平行移动
-
-**文字信息**（左上角）：
-- 第 1 行（绿色）：`Frame: XXX | FPS: XX` - 帧编号和实时帧率
-- 第 2 行（黄色）：`Features: XXX | Distance: XXcm` - 追踪特征数和累积距离
-
-#### 🌈 窗口 2: Depth Map（深度图）
-显示 Depth Anything V2 估计的单目深度图（JET 伪彩色）。
-
-**颜色含义**：
-- 🔵 蓝色/绿色 → 近距离物体
-- 🟡 黄色 → 中等距离
-- 🔴 红色 → 远距离物体
-
-**更新频率**：每 10 帧更新一次（GPU 异步推理）
-
-#### 🗺️ 窗口 3: Camera Trajectory（相机轨迹）
-俯视图显示相机在 3D 空间中的运动轨迹。
-
-**坐标系**：
-- X 轴（红色箭头）：水平向右
-- Z 轴（蓝色箭头）：垂直向上（深度方向）
-
-**轨迹线**：
-- 🟢 起点标记 + ⚪ 轨迹线（绿→红渐变）→ 🔴 当前位置
-
-**文字信息**：
-- 位置：(x, y, z) 米
-- 姿态：Roll, Pitch, Yaw 度
-- 距离和帧数统计
-
-### 快捷键
-
-- **Q** / **ESC** - 退出程序
-- **S** - 保存当前重建结果
-- **R** - 重置相机轨迹
-
-### 程序输出
-
-- **实时显示**：相机画面、深度图、运动轨迹、FPS 信息
-- **日志文件**：`endorobo.log`
-- **重建结果**：
-  - 点云文件：`reconstruction_*.pcd`
-  - 网格文件：`reconstruction_*.ply`
-
-## API文档
-
-### 核心类
-
-#### ConfigManager
-配置管理器，负责加载和管理所有配置参数。
-
-```cpp
-ConfigManager config("config/camera_config.yaml");
-config.loadConfig();
-auto camera_config = config.getCameraConfig();
-```
-
-#### CameraCapture
-相机采集类，实时获取图像数据。
-
-```cpp
-CameraCapture camera(camera_config);
-camera.initialize();
-camera.startCapture();
-cv::Mat frame;
-camera.getLatestFrame(frame);
-```
-
-#### DepthEstimator
-深度估计器，调用Python深度学习模型。
-
-```cpp
-DepthEstimator depth_estimator(depth_config, camera_config);
-depth_estimator.initialize(python_wrapper);
-DepthEstimation depth;
-depth_estimator.estimateDepth(frame, depth);
-```
-
-#### IntestinalReconstructor
-肠腔重建器，专门针对管状结构的3D重建。
-
-```cpp
-IntestinalReconstructor reconstructor(recon_config);
-reconstructor.initialize();
-reconstructor.addFrame(point_cloud, pose);
-auto result = reconstructor.getProcessedCloud();
-```
-
-## 性能优化
-
-- **多线程处理**：相机采集和图像处理在不同线程
-- **体素下采样**：控制点云大小，提高处理速度
-- **智能缓冲**：避免内存溢出
-- **GPU加速**：深度学习模型推理使用GPU
-
-典型性能（配置：i7-10700K + RTX 3070）：
-- 图像采集：30 FPS
-- 深度估计：~25 FPS
-- 点云构建：~20 FPS
-- 总处理延迟：~50ms
-
-## 医疗应用注意事项
-
-⚠️ **重要提示**：本系统目前仅用于**研究和开发目的**，尚未获得医疗器械认证，**不得用于临床诊断或治疗**。
-
-在实际医疗应用前需要：
-1. 完成临床试验和验证
-2. 获得相关医疗器械认证（如FDA、CFDA等）
-3. 建立完善的质量控制体系
-4. 确保数据安全和患者隐私保护
+## 日志与输出
+- 文本日志：`endorobo.log`
+- 点云/网格：`output/latest_cloud.pcd`、`output/*.pcd`、`output/*.ply`
+- 标定结果：`calibration/camera_calibration_from_images.yaml`
 
 ## 常见问题
+1. **相机无法打开**：确认 `camera_id`、驱动与权限；可用普通相机测试程序排查。
+2. **Python 模型加载失败**：检查 conda/venv 是否激活、`python_models` 依赖是否安装、模型路径是否正确。
+3. **点云窗口无更新**：确保 `config/camera_config.yaml` 中的内参、畸变为最新标定值；检查 `endorobo.log` 是否报错。
+4. **标定精度不足**：采集更多角度/距离的棋盘格照片，保持均匀光照；重新运行 `calibrate_from_images.py`。
 
-### 1. 相机无法打开
-- 检查相机是否正确连接
-- 确认 `camera_id` 配置正确
-- 在Windows上可能需要管理员权限
-
-### 2. Python模型加载失败
-- 确认Python环境配置正确
-- 检查模型文件路径
-- 查看 `python_models/README.md` 中的说明
-
-### 3. 编译错误
-- 确认所有依赖库已正确安装
-- 检查CMake版本和C++编译器版本
-- 查看详细的编译错误信息
-
-## 贡献指南
-
-欢迎提交Issue和Pull Request！
-
-1. Fork本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启Pull Request
+## 贡献
+欢迎通过 Issue/PR 反馈：
+1. Fork 仓库
+2. `git checkout -b feature/xxx`
+3. `git commit -m "Add xxx"`
+4. `git push origin feature/xxx`
+5. 提交 Pull Request
 
 ## 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
-
-## 联系方式
-
-如有问题或建议，请提交Issue或联系项目维护者。
-
-## 致谢
-
-感谢以下开源项目：
-- OpenCV
-- PCL (Point Cloud Library)
-- Eigen
-- PyTorch
+本项目采用 [MIT License](LICENSE)。
 
 ---
-
-**开发中**：本项目正在积极开发中，欢迎提出建议和反馈！
+**提示**：本系统目前仅用于科研和工程验证，尚未获得任何医疗器械认证，请勿用于临床诊疗。欢迎就功能需求、标定经验、可视化改进等方面提出建议。
