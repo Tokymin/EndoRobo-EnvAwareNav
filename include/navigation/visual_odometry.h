@@ -138,6 +138,7 @@ private:
     
     // Feature tracking
     cv::Mat previous_image_;
+    cv::Mat previous_depth_map_;
     std::vector<cv::Point2f> previous_points_;
     std::vector<cv::Point2f> current_points_;
     std::vector<uchar> tracking_status_;
@@ -150,6 +151,8 @@ private:
     CameraPose current_pose_;
     std::deque<CameraPose> trajectory_;
     double distance_traveled_;
+    double max_depth_m_;
+    double roi_ratio_;
     
     // Statistics
     int last_inlier_count_;

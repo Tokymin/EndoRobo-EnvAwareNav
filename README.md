@@ -53,12 +53,32 @@ pip install -r python_models/requirements.txt
 
 ## 编译
 ### Windows
+#### 重头开始
 ```powershell
+# Activate your conda environment
+conda activate EndoRobo-EnvAwareNav
+# Clean previous build
+Remove-Item -Recurse -Force build
 mkdir build
 cd build
-cmake .. -G "Visual Studio 17 2022" -A x64 ^
-    -DCMAKE_TOOLCHAIN_FILE=[vcpkg root]/scripts/buildsystems/vcpkg.cmake
-cmake --build . --config Release
+# Configure with correct Python
+cmake .. -G "Visual Studio 17 2022" -A x64 `
+    -DCMAKE_TOOLCHAIN_FILE=F:\Toky\VSProject\Repos\EndoRobo-EnvAwareNav\vcpkg\scripts\buildsystems\vcpkg.cmake `
+    -DPYTHON_EXECUTABLE="C:/Users/DELL/anaconda3/envs/EndoRobo-EnvAwareNav/python.exe"
+# Build
+cmake --build . --config Release --target endorobo_main
+```
+
+#### 调试过程中
+重新编译
+```powershell
+cd build
+cmake --build . --config Release --target endorobo_main
+```
+重新启动
+```powershell
+cd ..
+.\run_with_gui.bat
 ```
 生成的 `build/bin/Release/endorobo_main.exe` 供运行脚本调用。
 

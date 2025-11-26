@@ -1,5 +1,6 @@
 #include "python_interface/depth_estimator.h"
 #include "core/logger.h"
+#include <filesystem>
 
 namespace endorobo {
 
@@ -212,20 +213,54 @@ bool DepthEstimator::estimateDepth(const cv::Mat& image, DepthEstimation& result
             return false;
         }
         
+        // 调试：记录原始深度图统计信息并保存前几帧原始图
+        double min_val = 0.0, max_val = 0.0;
+        cv::minMaxLoc(depth_map, &min_val, &max_val);
+        LOG_INFO("DepthEstimator: raw depth_map type=", depth_map.type(),
+                 " size=", depth_map.cols, "x", depth_map.rows,
+                 " min=", min_val, " max=", max_val);
+
+        static int debug_depth_dump_count = 0;
+        if (debug_depth_dump_count < 5) {
+            std::error_code ec;
+            std::filesystem::create_directories("output/debug", ec);
+            std::string filename = "output/debug/depth_raw_" +
+                                   std::to_string(debug_depth_dump_count) + ".png";
+            if (cv::imwrite(filename, depth_map)) {
+                LOG_INFO("DepthEstimator: saved raw depth to ", filename);
+            } else {
+                LOG_WARNING("DepthEstimator: failed to save raw depth to ", filename);
+            }
+            debug_depth_dump_count++;
+        }
+
+        // 转换为以米为单位的32位浮点深度图
+        const double alpha = (config_.max_depth - config_.min_depth) / 255.0;
+        cv::Mat depth_float;
+        depth_map.convertTo(depth_float, CV_32F, alpha, config_.min_depth);
+
+        double float_min = 0.0, float_max = 0.0;
+        cv::minMaxLoc(depth_float, &float_min, &float_max);
+        LOG_INFO("DepthEstimator: converted depth type=", depth_float.type(),
+                 " size=", depth_float.cols, "x", depth_float.rows,
+                 " min=", float_min, " max=", float_max);
+
         // 填充结果
-        result.depth_map = depth_map.clone();
+        result.depth_map = depth_float.clone();
         result.valid = true;
         
         // 提取深度特征点（简单采样）
         result.feature_points.clear();
         const int step = 20;  // 每20个像素采样一个点
-        for (int y = 0; y < depth_map.rows; y += step) {
-            for (int x = 0; x < depth_map.cols; x += step) {
-                float depth = depth_map.at<uint8_t>(y, x) / 255.0f;  // 归一化深度
-                result.feature_points.push_back(cv::Point3f(x, y, depth));
+        for (int y = 0; y < depth_float.rows; y += step) {
+            for (int x = 0; x < depth_float.cols; x += step) {
+                float depth = depth_float.at<float>(y, x);
+                result.feature_points.push_back(cv::Point3f(static_cast<float>(x),
+                                                            static_cast<float>(y),
+                                                            depth));
             }
         }
-        
+
         return true;
     }
     catch (const std::exception& e) {

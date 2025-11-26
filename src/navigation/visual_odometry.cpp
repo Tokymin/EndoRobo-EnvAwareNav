@@ -3,8 +3,10 @@
 #include <opencv2/video/tracking.hpp>
 #include <opencv2/calib3d.hpp>
 #include <Eigen/SVD>
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 
 // Define M_PI for MSVC
@@ -41,8 +43,10 @@ VisualOdometry::VisualOdometry(const Config& config)
     , initialized_(false)
     , frame_count_(0)
     , distance_traveled_(0.0)
-    , last_inlier_count_(0) {
-}
+    , last_inlier_count_(0)
+    , max_depth_m_(config.max_depth)
+    , roi_ratio_(0.6) {
+    }
 
 VisualOdometry::~VisualOdometry() {
 }
@@ -65,6 +69,24 @@ bool VisualOdometry::initialize(const cv::Mat& camera_matrix) {
     initialized_ = true;
     frame_count_ = 0;
     distance_traveled_ = 0.0;
+    
+    const char* max_depth_env = std::getenv("POINT_CLOUD_MAX_DEPTH_M");
+    if (max_depth_env) {
+        try {
+            max_depth_m_ = std::stod(max_depth_env);
+        } catch (...) {
+            max_depth_m_ = config_.max_depth;
+        }
+    } else {
+        max_depth_m_ = config_.max_depth;
+    }
+    if (const char* roi_env = std::getenv("POINT_CLOUD_ROI_RATIO")) {
+        try {
+            roi_ratio_ = std::clamp(std::stod(roi_env), 0.1, 1.0);
+        } catch (...) {
+            roi_ratio_ = 0.6;
+        }
+    }
     
     LOG_INFO("Visual odometry initialized successfully");
     return true;
@@ -95,6 +117,7 @@ bool VisualOdometry::processFrame(const cv::Mat& image, const cv::Mat& depth_map
     if (frame_count_ == 1) {
         detectFeatures(gray_image);
         previous_image_ = gray_image.clone();
+        depth_map.copyTo(previous_depth_map_);
         pose = current_pose_;
         return true;
     }
@@ -116,7 +139,12 @@ bool VisualOdometry::processFrame(const cv::Mat& image, const cv::Mat& depth_map
     
     // Estimate camera motion using 3D-3D correspondences
     Eigen::Matrix4d relative_transform;
-    bool motion_estimated = estimateMotion(depth_map, relative_transform);
+    bool motion_estimated = false;
+    if (!previous_depth_map_.empty()) {
+        motion_estimated = estimateMotion(depth_map, relative_transform);
+    } else {
+        LOG_WARNING("Previous depth map missing, skipping motion estimation");
+    }
     
     if (motion_estimated) {
         // Update global pose
@@ -137,6 +165,7 @@ bool VisualOdometry::processFrame(const cv::Mat& image, const cv::Mat& depth_map
     // Prepare for next frame
     previous_image_ = gray_image.clone();
     previous_points_ = current_points_;
+    depth_map.copyTo(previous_depth_map_);
     
     // Re-detect features if we have too few
     if (current_points_.size() < config_.max_features / 2) {
@@ -214,40 +243,83 @@ bool VisualOdometry::estimateMotion(const cv::Mat& depth_map, Eigen::Matrix4d& t
     previous_points_3d_.clear();
     current_points_3d_.clear();
     
+    size_t skipped_out_of_bounds = 0;
+    size_t skipped_invalid_depth = 0;
+
+    int width = depth_map.cols;
+    int height = depth_map.rows;
+    int roi_width = static_cast<int>(width * roi_ratio_);
+    int roi_height = static_cast<int>(height * roi_ratio_);
+    int u_min = (width - roi_width) / 2;
+    int v_min = (height - roi_height) / 2;
+    int u_max = u_min + roi_width;
+    int v_max = v_min + roi_height;
+
+    int prev_width = previous_depth_map_.cols;
+    int prev_height = previous_depth_map_.rows;
+    int prev_roi_width = static_cast<int>(prev_width * roi_ratio_);
+    int prev_roi_height = static_cast<int>(prev_height * roi_ratio_);
+    int prev_u_min = (prev_width - prev_roi_width) / 2;
+    int prev_v_min = (prev_height - prev_roi_height) / 2;
+    int prev_u_max = prev_u_min + prev_roi_width;
+    int prev_v_max = prev_v_min + prev_roi_height;
+
     for (size_t i = 0; i < previous_points_.size(); i++) {
-        // Get depth at current point
+        // Get depth at current and previous points
         int x_curr = static_cast<int>(current_points_[i].x);
         int y_curr = static_cast<int>(current_points_[i].y);
+        int x_prev = static_cast<int>(previous_points_[i].x);
+        int y_prev = static_cast<int>(previous_points_[i].y);
         
-        if (x_curr < 0 || x_curr >= depth_map.cols || y_curr < 0 || y_curr >= depth_map.rows) {
+        if (x_curr < u_min || x_curr >= u_max || y_curr < v_min || y_curr >= v_max ||
+            x_prev < prev_u_min || x_prev >= prev_u_max || y_prev < prev_v_min || y_prev >= prev_v_max) {
+            skipped_out_of_bounds++;
             continue;
         }
         
-        // Depth map is CV_8U (0-255), normalize to meters (assuming max depth = 10m)
-        float depth = static_cast<float>(depth_map.at<uint8_t>(y_curr, x_curr) / 255.0 * config_.max_depth);
-        
-        if (depth < config_.min_depth || depth > config_.max_depth) {
+        auto sample_depth = [](const cv::Mat& depth_img, int x, int y, double max_depth) -> std::optional<float> {
+            float depth = 0.0f;
+            if (depth_img.type() == CV_8UC1) {
+                depth = static_cast<float>(depth_img.at<uint8_t>(y, x) / 255.0 * max_depth);
+            } else if (depth_img.type() == CV_32FC1) {
+                depth = depth_img.at<float>(y, x);
+            } else {
+                return std::nullopt;
+            }
+            return depth;
+        };
+        auto depth_curr_opt = sample_depth(depth_map, x_curr, y_curr, config_.max_depth);
+        auto depth_prev_opt = sample_depth(previous_depth_map_, x_prev, y_prev, config_.max_depth);
+        if (!depth_curr_opt || !depth_prev_opt) {
+            skipped_invalid_depth++;
+            continue;
+        }
+        float depth_curr = *depth_curr_opt;
+        float depth_prev = *depth_prev_opt;
+        if (depth_curr < config_.min_depth || depth_curr > std::min(config_.max_depth, max_depth_m_) ||
+            depth_prev < config_.min_depth || depth_prev > std::min(config_.max_depth, max_depth_m_)) {
+            skipped_invalid_depth++;
             continue;
         }
         
-        // Unproject to 3D (current frame)
         cv::Point3d p3d_curr;
-        p3d_curr.z = depth;
-        p3d_curr.x = (current_points_[i].x - cx) * depth / fx;
-        p3d_curr.y = (current_points_[i].y - cy) * depth / fy;
+        p3d_curr.z = depth_curr;
+        p3d_curr.x = (current_points_[i].x - cx) * depth_curr / fx;
+        p3d_curr.y = (current_points_[i].y - cy) * depth_curr / fy;
         
-        // For previous frame, use the same depth (approximation)
         cv::Point3d p3d_prev;
-        p3d_prev.z = depth;
-        p3d_prev.x = (previous_points_[i].x - cx) * depth / fx;
-        p3d_prev.y = (previous_points_[i].y - cy) * depth / fy;
+        p3d_prev.z = depth_prev;
+        p3d_prev.x = (previous_points_[i].x - cx) * depth_prev / fx;
+        p3d_prev.y = (previous_points_[i].y - cy) * depth_prev / fy;
         
         previous_points_3d_.push_back(p3d_prev);
         current_points_3d_.push_back(p3d_curr);
     }
     
     if (previous_points_3d_.size() < config_.min_inliers) {
-        LOG_WARNING("Not enough 3D points: ", previous_points_3d_.size(), " < ", config_.min_inliers);
+        LOG_WARNING("Not enough 3D points: ", previous_points_3d_.size(), " < ", config_.min_inliers,
+                    ", skipped out-of-bounds=", skipped_out_of_bounds,
+                    ", skipped invalid depth=", skipped_invalid_depth);
         return false;
     }
     

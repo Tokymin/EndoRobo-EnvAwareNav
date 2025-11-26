@@ -2,6 +2,7 @@
 #include "core/logger.h"
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/common/transforms.h>
+#include <algorithm>
 
 namespace endorobo {
 
@@ -29,8 +30,32 @@ PointCloudBuilder::PointCloudType::Ptr PointCloudBuilder::createPointCloud(
         return cloud;
     }
     
+    double max_depth_m = 2.0;
+    if (const char* max_depth_env = std::getenv("POINT_CLOUD_MAX_DEPTH_M")) {
+        try {
+            max_depth_m = std::stod(max_depth_env);
+        } catch (...) {
+            LOG_WARNING("Invalid POINT_CLOUD_MAX_DEPTH_M value: ", max_depth_env);
+        }
+    }
+    
+    double roi_ratio = 0.6;
+    if (const char* roi_env = std::getenv("POINT_CLOUD_ROI_RATIO")) {
+        try {
+            roi_ratio = std::clamp(std::stod(roi_env), 0.1, 1.0);
+        } catch (...) {
+            LOG_WARNING("Invalid POINT_CLOUD_ROI_RATIO value: ", roi_env);
+        }
+    }
+    
     int width = depth_map.cols;
     int height = depth_map.rows;
+    int roi_width = static_cast<int>(width * roi_ratio);
+    int roi_height = static_cast<int>(height * roi_ratio);
+    int u_min = (width - roi_width) / 2;
+    int v_min = (height - roi_height) / 2;
+    int u_max = u_min + roi_width;
+    int v_max = v_min + roi_height;
     
     cloud->width = width;
     cloud->height = height;
@@ -40,12 +65,17 @@ PointCloudBuilder::PointCloudType::Ptr PointCloudBuilder::createPointCloud(
     // 遍历每个像素
     for (int v = 0; v < height; ++v) {
         for (int u = 0; u < width; ++u) {
+            if (u < u_min || u >= u_max || v < v_min || v >= v_max) {
+                PointType& pt = cloud->at(u, v);
+                pt.x = pt.y = pt.z = std::numeric_limits<float>::quiet_NaN();
+                continue;
+            }
             PointType& pt = cloud->at(u, v);
             
             float depth = depth_map.at<float>(v, u);
             
             // 跳过无效深度 - 添加合理范围检查
-            if (depth <= 0.0f || depth > 10.0f || std::isnan(depth) || std::isinf(depth)) {
+            if (depth <= 0.0f || depth > max_depth_m || std::isnan(depth) || std::isinf(depth)) {
                 pt.x = pt.y = pt.z = std::numeric_limits<float>::quiet_NaN();
                 continue;
             }

@@ -3,7 +3,10 @@
 #include <thread>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
+#include <algorithm>
+#include <Eigen/Dense>
 
 // Include logger.h FIRST to prevent any namespace pollution
 #include "core/logger.h"
@@ -48,7 +51,16 @@ public:
         , depth_frame_ready_(false)
         , visualization_running_(false)
         , visualization_cloud_(nullptr)
-        , cloud_exported_(false) {
+        , cloud_exported_(false)
+        , keyframe_initialized_(false)
+        , keyframe_min_translation_(0.01)
+        , keyframe_min_rotation_deg_(5.0) {
+        if (const char* env = std::getenv("KEYFRAME_MIN_TRANSLATION_M")) {
+            try { keyframe_min_translation_ = std::stod(env); } catch (...) {}
+        }
+        if (const char* env = std::getenv("KEYFRAME_MIN_ROTATION_DEG")) {
+            try { keyframe_min_rotation_deg_ = std::stod(env); } catch (...) {}
+        }
     }
     
     ~EndoRoboApp() {
@@ -497,16 +509,9 @@ private:
             // Pose estimation
             PoseEstimation pose;
             frame_timer.start("pose_estimation");
-            if (pose_estimator_ && pose_estimator_->isInitialized()) {
-                if (!pose_estimator_->estimatePose(processed_frame, previous_frame, pose)) {
-                    LOG_DEBUG("Pose estimation failed, will try visual odometry fallback");
-                    pose.transformation = Eigen::Matrix4d::Identity();
-                    pose.valid = false;
-                }
-            } else {
-                pose.transformation = Eigen::Matrix4d::Identity();
-                pose.valid = false;
-            }
+            // Temporarily disable Python-based pose estimator to focus on VO debugging
+            pose.transformation = Eigen::Matrix4d::Identity();
+            pose.valid = false;
             double pose_time = frame_timer.stop("pose_estimation");
             
             // Submit depth estimation task asynchronously (always keep latest frame ready)
@@ -566,7 +571,18 @@ private:
                     depth_for_cloud, processed_frame, pose,
                     cam_config.fx, cam_config.fy, cam_config.cx, cam_config.cy);
                 if (cloud && !cloud->empty()) {
-                    intestinal_reconstructor_->addFrame(cloud, pose);
+                    if (!pose.valid) {
+                        LOG_WARNING("Skipping cloud accumulation due to invalid pose");
+                    } else {
+                        double keyframe_trans = 0.0;
+                        double keyframe_rot = 0.0;
+                        if (shouldAddKeyframe(pose, keyframe_trans, keyframe_rot)) {
+                            intestinal_reconstructor_->addFrame(cloud, pose);
+                        } else {
+                            LOG_INFO("Skipping frame (not a keyframe) trans=", keyframe_trans,
+                                     ", rot=", keyframe_rot);
+                        }
+                    }
 
                     if (visualization_running_) {
                         auto accumulated = intestinal_reconstructor_->getAccumulatedCloud();
@@ -698,6 +714,36 @@ private:
     std::mutex cloud_mutex_;
     PointCloudBuilder::PointCloudType::Ptr visualization_cloud_;
     std::atomic<bool> cloud_exported_;
+    bool keyframe_initialized_;
+    double keyframe_min_translation_;
+    double keyframe_min_rotation_deg_;
+    Eigen::Matrix4d last_keyframe_transform_ = Eigen::Matrix4d::Identity();
+    Eigen::Vector3d last_keyframe_translation_ = Eigen::Vector3d::Zero();
+    Eigen::Quaterniond last_keyframe_rotation_ = Eigen::Quaterniond::Identity();
+
+    bool shouldAddKeyframe(const PoseEstimation& pose, double& translation_delta, double& rotation_delta_deg) {
+        translation_delta = 0.0;
+        rotation_delta_deg = 0.0;
+        if (!keyframe_initialized_) {
+            last_keyframe_transform_ = pose.transformation;
+            last_keyframe_translation_ = pose.translation;
+            last_keyframe_rotation_ = pose.rotation;
+            keyframe_initialized_ = true;
+            return true;
+        }
+        translation_delta = (pose.translation - last_keyframe_translation_).norm();
+        Eigen::Quaterniond delta_q = last_keyframe_rotation_.conjugate() * pose.rotation;
+        delta_q.normalize();
+        double angle_rad = 2.0 * std::acos(std::clamp(delta_q.w(), -1.0, 1.0));
+        rotation_delta_deg = angle_rad * 180.0 / 3.14159265358979323846;
+        if (translation_delta >= keyframe_min_translation_ || rotation_delta_deg >= keyframe_min_rotation_deg_) {
+            last_keyframe_transform_ = pose.transformation;
+            last_keyframe_translation_ = pose.translation;
+            last_keyframe_rotation_ = pose.rotation;
+            return true;
+        }
+        return false;
+    }
 
     void exportPointCloudOnce(const PointCloudBuilder::PointCloudType::Ptr& cloud) {
         if (cloud_exported_.load()) return;
